@@ -23,6 +23,10 @@
 
 ## News & Updates
 
+Apr. 2025
+- **Oral at CVPR 2025**: Cheers!
+- **Top on the WOSAC Leaderboard 2024**: With the Waymo Challenges 2025 coming up, the WOSAC 2024 leaderboard is now closed and our method remains in the 1st place.
+
 Feb. 2025
 - **Paper accepted at CVPR 2025:** Cheers!
 
