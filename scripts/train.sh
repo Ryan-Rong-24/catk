@@ -7,8 +7,8 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 MY_EXPERIMENT="pre_bc"
 MY_TASK_NAME=$MY_EXPERIMENT"-debug"
 
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate catk
+# source ~/miniconda3/etc/profile.d/conda.sh
+# conda activate catk
 torchrun \
   -m src.run \
   experiment=$MY_EXPERIMENT \

@@ -5,7 +5,7 @@
 defaults:
   - _self_
   - data: waymo
-  - model: smart
+  - model: smart_nano_1M
   - callbacks: default
   - logger: wandb
   - trainer: default

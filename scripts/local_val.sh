@@ -7,8 +7,6 @@ MY_EXPERIMENT="local_val"
 VAL_K=48
 MY_TASK_NAME=$MY_EXPERIMENT-K$VAL_K"-debug"
 
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate catk
 # local_val runs on single GPU
 python \
   -m src.run \
@@ -18,6 +16,9 @@ python \
   trainer.accelerator=gpu \
   trainer.devices=1 \
   trainer.strategy=auto \
-  task_name=$MY_TASK_NAME
+  task_name=$MY_TASK_NAME \
+  ckpt_path=logs/clsft_E9.ckpt \
+  ++data.val_raw_dir=/workspace/scratch/cache/SMART/validation \
+  ++data.val_tfrecords_splitted=/workspace/scratch/cache/SMART/validation_tfrecords_splitted
 
 echo "bash local_val.sh done!"

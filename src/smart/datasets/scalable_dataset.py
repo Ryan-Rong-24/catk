@@ -30,6 +30,10 @@ class MultiDataset(Dataset):
         tfrecord_dir: Optional[str] = None,
     ) -> None:
         raw_dir = Path(raw_dir)
+        print(f"Raw directory path: {raw_dir}")
+        print(f"Raw directory exists: {raw_dir.exists()}")
+        print(f"Raw directory is dir: {raw_dir.is_dir()}")
+        print(f"Raw directory absolute: {raw_dir.absolute()}")
         self._raw_paths = [p.as_posix() for p in sorted(raw_dir.glob("*"))]
         self._num_samples = len(self._raw_paths)
 

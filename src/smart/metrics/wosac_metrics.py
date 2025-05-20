@@ -27,6 +27,7 @@ from waymo_open_dataset.protos import (
     sim_agents_metrics_pb2,
     sim_agents_submission_pb2,
 )
+import logging as log
 
 
 class WOSACMetrics(Metric):
@@ -66,11 +67,15 @@ class WOSACMetrics(Metric):
     def _compute_scenario_metrics(
         config, scenario_file, scenario_rollout, ego_only
     ) -> sim_agents_metrics_pb2.SimAgentMetrics:
+        log.info(f"Loading scenario from {scenario_file}")
         scenario = scenario_pb2.Scenario()
         for data in tf.data.TFRecordDataset([scenario_file], compression_type=""):
             scenario.ParseFromString(bytes(data.numpy()))
             break
+        log.info("Scenario loaded successfully")
+        
         if ego_only:
+            log.info("Processing ego-only scenario")
             for i in range(len(scenario.tracks)):
                 if i != scenario.sdc_track_index:
                     for t in range(91):
@@ -78,42 +83,61 @@ class WOSACMetrics(Metric):
             while len(scenario.tracks_to_predict) > 1:
                 scenario.tracks_to_predict.pop()
             scenario.tracks_to_predict[0].track_index = scenario.sdc_track_index
+            log.info("Ego-only processing complete")
 
-        return wosac_metrics.compute_scenario_metrics_for_bundle(
-            config, scenario, scenario_rollout
-        )
+        log.info("Computing scenario metrics...")
+        try:
+            metrics = wosac_metrics.compute_scenario_metrics_for_bundle(
+                config, scenario, scenario_rollout
+            )
+            log.info("Metrics computation complete")
+            return metrics
+        except Exception as e:
+            log.error(f"Error computing metrics: {str(e)}")
+            raise
 
     def update(
         self,
         scenario_files: List[str],
         scenario_rollouts: List[sim_agents_submission_pb2.ScenarioRollouts],
     ) -> None:
-
-        if os.environ.get("CUDA_VISIBLE_DEVICES", "") in ["", "0"]:
-            if not self.is_mp_init:
-                self.is_mp_init = True
-                mp.set_start_method("forkserver", force=True)
-            with mp.Pool(processes=len(scenario_rollouts)) as pool:
-                pool_scenario_metrics = pool.starmap(
-                    self._compute_scenario_metrics,
-                    zip(
-                        itertools.repeat(self.wosac_config),
-                        scenario_files,
-                        scenario_rollouts,
-                        itertools.repeat(self.ego_only),
-                    ),
+        log.info(f"Starting WOSAC metrics update for {len(scenario_files)} scenarios")
+        
+        # Always use sequential processing for validation
+        log.info("Running metrics computation sequentially...")
+        pool_scenario_metrics = []
+        
+        for i, (_scenario, _scenario_rollout) in enumerate(zip(scenario_files, scenario_rollouts)):
+            log.info(f"Processing scenario {i+1}/{len(scenario_files)}")
+            try:
+                # Log memory usage before processing scenario
+                import psutil
+                process = psutil.Process()
+                mem_info = process.memory_info()
+                log.info(f"Memory usage before scenario: {mem_info.rss / 1024 / 1024:.2f} MB")
+                
+                metrics = self._compute_scenario_metrics(
+                    self.wosac_config, _scenario, _scenario_rollout, self.ego_only
                 )
-                pool.close()
-                pool.join()
-        else:
-            pool_scenario_metrics = []
-            for _scenario, _scenario_rollout in zip(scenario_files, scenario_rollouts):
-                pool_scenario_metrics.append(
-                    self._compute_scenario_metrics(
-                        self.wosac_config, _scenario, _scenario_rollout, self.ego_only
-                    )
-                )
+                pool_scenario_metrics.append(metrics)
+                
+                # Log memory usage after processing scenario
+                mem_info = process.memory_info()
+                log.info(f"Memory usage after scenario: {mem_info.rss / 1024 / 1024:.2f} MB")
+                
+                # Force garbage collection after each scenario
+                import gc
+                gc.collect()
+                
+            except Exception as e:
+                log.error(f"Error processing scenario {i+1}: {str(e)}")
+                continue
 
+        if not pool_scenario_metrics:
+            log.warning("No metrics were computed successfully")
+            return
+
+        log.info("Updating metric states...")
         for scenario_metrics in pool_scenario_metrics:
             self.scenario_counter += 1
             self.metametric += scenario_metrics.metametric
@@ -148,6 +172,8 @@ class WOSACMetrics(Metric):
             )
             self.simulated_collision_rate += scenario_metrics.simulated_collision_rate
             self.simulated_offroad_rate += scenario_metrics.simulated_offroad_rate
+        
+        log.info("WOSAC metrics update complete")
 
     def compute(self) -> Dict[str, Tensor]:
         metrics_dict = {}

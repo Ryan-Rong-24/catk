@@ -18,6 +18,7 @@ import hydra
 import torch
 from lightning import LightningModule
 from torch.optim.lr_scheduler import LambdaLR
+import logging
 
 from src.smart.metrics import (
     CrossEntropy,
@@ -32,6 +33,7 @@ from src.smart.utils.finetune import set_model_for_finetuning
 from src.utils.vis_waymo import VisWaymo
 from src.utils.wosac_utils import get_scenario_id_int_tensor, get_scenario_rollouts
 
+log = logging.getLogger(__name__)
 
 class SMART(LightningModule):
 
@@ -94,10 +96,15 @@ class SMART(LightningModule):
         return loss
 
     def validation_step(self, data, batch_idx):
+        log.info(f"Starting validation step {batch_idx}")
+        
+        log.info("Tokenizing map and agent data...")
         tokenized_map, tokenized_agent = self.token_processor(data)
+        log.info("Tokenization complete")
 
         # ! open-loop vlidation
         if self.val_open_loop:
+            log.info("Running open-loop validation...")
             pred = self.encoder(tokenized_map, tokenized_agent)
             loss = self.training_loss(
                 **pred,
@@ -120,17 +127,21 @@ class SMART(LightningModule):
                 batch_size=1,
             )
             self.log("val_open/loss", loss, on_epoch=True, sync_dist=True, batch_size=1)
+            log.info("Open-loop validation complete")
 
         # ! closed-loop vlidation
         if self.val_closed_loop:
+            log.info("Starting closed-loop validation...")
             pred_traj, pred_z, pred_head = [], [], []
-            for _ in range(self.n_rollout_closed_val):
+            for i in range(self.n_rollout_closed_val):
+                log.info(f"Running rollout {i+1}/{self.n_rollout_closed_val}")
                 pred = self.encoder.inference(
                     tokenized_map, tokenized_agent, self.validation_rollout_sampling
                 )
                 pred_traj.append(pred["pred_traj_10hz"])
                 pred_z.append(pred["pred_z_10hz"])
                 pred_head.append(pred["pred_head_10hz"])
+            log.info("All rollouts complete")
 
             pred_traj = torch.stack(pred_traj, dim=1)  # [n_ag, n_rollout, n_step, 2]
             pred_z = torch.stack(pred_z, dim=1)  # [n_ag, n_rollout, n_step]
@@ -139,6 +150,7 @@ class SMART(LightningModule):
             # ! WOSAC
             scenario_rollouts = None
             if self.wosac_submission.is_active:  # ! save WOSAC submission
+                log.info("Processing WOSAC submission...")
                 self.wosac_submission.update(
                     scenario_id=data["scenario_id"],
                     agent_id=data["agent"]["id"],
@@ -148,16 +160,21 @@ class SMART(LightningModule):
                     pred_head=pred_head,
                     global_rank=self.global_rank,
                 )
+                log.info("Computing WOSAC submission metrics...")
                 _gpu_dict_sync = self.wosac_submission.compute()
                 if self.global_rank == 0:
                     for k in _gpu_dict_sync.keys():  # single gpu fix
                         if type(_gpu_dict_sync[k]) is list:
                             _gpu_dict_sync[k] = _gpu_dict_sync[k][0]
+                    log.info("Getting scenario rollouts...")
                     scenario_rollouts = get_scenario_rollouts(**_gpu_dict_sync)
+                    log.info("Aggregating rollouts...")
                     self.wosac_submission.aggregate_rollouts(scenario_rollouts)
                 self.wosac_submission.reset()
+                log.info("WOSAC submission processing complete")
 
             else:  # ! compute metrics, disable if save WOSAC submission
+                log.info("Computing metrics...")
                 self.minADE.update(
                     pred=pred_traj,
                     target=data["agent"]["position"][
@@ -170,7 +187,9 @@ class SMART(LightningModule):
 
                 # WOSAC metrics
                 if batch_idx < self.n_batch_wosac_metric:
+                    log.info(f"Computing WOSAC metrics for batch {batch_idx} (n_batch_wosac_metric: {self.n_batch_wosac_metric})...")
                     device = pred_traj.device
+                    log.info("Creating scenario rollouts...")
                     scenario_rollouts = get_scenario_rollouts(
                         scenario_id=get_scenario_id_int_tensor(
                             data["scenario_id"], device
@@ -181,11 +200,17 @@ class SMART(LightningModule):
                         pred_z=pred_z,
                         pred_head=pred_head,
                     )
+                    log.info(f"Created {len(scenario_rollouts)} scenario rollouts")
+                    log.info("Updating WOSAC metrics...")
                     self.wosac_metrics.update(data["tfrecord_path"], scenario_rollouts)
+                    log.info("WOSAC metrics update complete")
+                else:
+                    log.info(f"Skipping WOSAC metrics for batch {batch_idx} (n_batch_wosac_metric: {self.n_batch_wosac_metric})")
 
             # ! visualization
             if self.global_rank == 0 and batch_idx < self.n_vis_batch:
                 if scenario_rollouts is not None:
+                    log.info(f"Generating visualizations for batch {batch_idx} (n_vis_batch: {self.n_vis_batch})...")
                     for _i_sc in range(self.n_vis_scenario):
                         _vis = VisWaymo(
                             scenario_path=data["tfrecord_path"][_i_sc],
@@ -199,6 +224,13 @@ class SMART(LightningModule):
                             self.logger.log_video(
                                 "/".join(_path.split("/")[-3:]), [_path]
                             )
+                    log.info("Visualization complete")
+                else:
+                    log.info("No scenario rollouts available for visualization")
+            else:
+                log.info(f"Skipping visualization for batch {batch_idx} (n_vis_batch: {self.n_vis_batch})")
+
+        log.info(f"Validation step {batch_idx} complete")
 
     def on_validation_epoch_end(self):
         if self.val_closed_loop:

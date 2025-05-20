@@ -21,6 +21,10 @@ from src.smart.datasets import MultiDataset
 
 from .target_builder import WaymoTargetBuilderTrain, WaymoTargetBuilderVal
 
+import logging
+
+log = logging.getLogger(__name__)
+
 
 class MultiDataModule(LightningDataModule):
     def __init__(
@@ -57,19 +61,23 @@ class MultiDataModule(LightningDataModule):
 
     def setup(self, stage: Optional[str] = None) -> None:
         if stage == "fit" or stage is None:
+            log.info("Setting up training dataset...")
             self.train_dataset = MultiDataset(self.train_raw_dir, self.train_transform)
+            log.info("Setting up validation dataset...")
             self.val_dataset = MultiDataset(
                 self.val_raw_dir,
                 self.val_transform,
                 tfrecord_dir=self.val_tfrecords_splitted,
             )
         elif stage == "validate":
+            log.info("Setting up validation dataset for validation stage...")
             self.val_dataset = MultiDataset(
                 self.val_raw_dir,
                 self.val_transform,
                 tfrecord_dir=self.val_tfrecords_splitted,
             )
         elif stage == "test":
+            log.info("Setting up test dataset...")
             self.test_dataset = MultiDataset(self.test_raw_dir, self.test_transform)
         else:
             raise ValueError(f"{stage} should be one of [fit, validate, test]")
@@ -86,12 +94,19 @@ class MultiDataModule(LightningDataModule):
         )
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
+        log.info("Creating validation dataloader...")
+        log.info(f"Validation dataset size: {len(self.val_dataset)}")
+        log.info(f"Validation batch size: {self.val_batch_size}")
+        log.info(f"Number of workers: {self.num_workers}")
+        log.info(f"Pin memory: {self.pin_memory}")
+        log.info(f"Persistent workers: {self.persistent_workers}")
+        
         return DataLoader(
             self.val_dataset,
             batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            pin_memory=self.pin_memory,  # False
+            pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers,
             drop_last=False,
         )

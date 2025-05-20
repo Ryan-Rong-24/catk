@@ -2,16 +2,16 @@
 
 wandb:
   _target_: lightning.pytorch.loggers.wandb.WandbLogger
-  name: ${task_name}
+  name: ${task_name}-${now:%Y-%m-%d_%H-%M-%S}
   save_dir: "${paths.output_dir}"
   offline: False
   id: null # pass correct id to resume experiment!
   anonymous: null # enable anonymous logging
-  project: clsft-catk
+  project: catk
   log_model: False # upload lightning ckpts
   prefix: "" # a string to put at the beginning of metric keys
-  entity: YOUR_ENTITY
+  entity: null
   group: ""
   tags: []
-  job_type: ""
+  job_type: "training"
   resume: allow
