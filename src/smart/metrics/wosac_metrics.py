@@ -69,7 +69,8 @@ class WOSACMetrics(Metric):
     ) -> sim_agents_metrics_pb2.SimAgentMetrics:
         log.info(f"Loading scenario from {scenario_file}")
         scenario = scenario_pb2.Scenario()
-        for data in tf.data.TFRecordDataset([scenario_file], compression_type=""):
+        dataset = tf.data.TFRecordDataset([scenario_file], compression_type="")
+        for data in dataset:
             scenario.ParseFromString(bytes(data.numpy()))
             break
         log.info("Scenario loaded successfully")
@@ -124,10 +125,6 @@ class WOSACMetrics(Metric):
                 # Log memory usage after processing scenario
                 mem_info = process.memory_info()
                 log.info(f"Memory usage after scenario: {mem_info.rss / 1024 / 1024:.2f} MB")
-                
-                # Force garbage collection after each scenario
-                import gc
-                gc.collect()
                 
             except Exception as e:
                 log.error(f"Error processing scenario {i+1}: {str(e)}")
