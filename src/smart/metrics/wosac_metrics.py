@@ -173,16 +173,24 @@ class WOSACMetrics(Metric):
         log.info("WOSAC metrics update complete")
 
     def compute(self) -> Dict[str, Tensor]:
+        log.info("="*50)
+        log.info("Starting WOSAC metrics computation...")
+        log.info(f"Total scenarios processed: {self.scenario_counter}")
+        
         metrics_dict = {}
         for k in self.field_names:
-            metrics_dict[k] = getattr(self, k) / self.scenario_counter
+            raw_value = getattr(self, k)
+            metrics_dict[k] = raw_value / self.scenario_counter
+            log.info(f"Computed {k}: raw={raw_value}, normalized={metrics_dict[k]}")
 
         mean_metrics = sim_agents_metrics_pb2.SimAgentMetrics(
             scenario_id="", **metrics_dict
         )
+        log.info("Computing final metrics from mean metrics...")
         final_metrics = wosac_metrics.aggregate_metrics_to_buckets(
             self.wosac_config, mean_metrics
         )
+        log.info(f"Final metrics computed: {final_metrics}")
 
         out_dict = {
             f"{self.prefix}/wosac/realism_meta_metric": final_metrics.realism_meta_metric,
@@ -194,7 +202,16 @@ class WOSACMetrics(Metric):
         }
         for k in self.field_names:
             out_dict[f"{self.prefix}/wosac_likelihood/{k}"] = metrics_dict[k]
-
+        
+        # Print each metric value separately for clarity
+        log.info("Final metrics values:")
+        for k, v in out_dict.items():
+            if isinstance(v, torch.Tensor):
+                log.info(f"{k}: {v.item()}")
+            else:
+                log.info(f"{k}: {v}")
+        
+        log.info("="*50)
         return out_dict
 
     @staticmethod

@@ -96,7 +96,10 @@ class SMART(LightningModule):
         return loss
 
     def validation_step(self, data, batch_idx):
-        log.info(f"Starting validation step {batch_idx}")
+        log.info(f"Starting validation step {batch_idx} on rank {self.global_rank}")
+        log.info(f"Wandb logger available: {self.logger is not None}")
+        if self.logger is not None:
+            log.info(f"Wandb logger type: {type(self.logger)}")
         
         log.info("Tokenizing map and agent data...")
         tokenized_map, tokenized_agent = self.token_processor(data)
@@ -235,17 +238,27 @@ class SMART(LightningModule):
     def on_validation_epoch_end(self):
         if self.val_closed_loop:
             if not self.wosac_submission.is_active:
+                log.info("Computing WOSAC metrics at epoch end...")
                 epoch_wosac_metrics = self.wosac_metrics.compute()
+                log.info(f"Computed WOSAC metrics: {epoch_wosac_metrics}")
+                
                 epoch_wosac_metrics["val_closed/ADE"] = self.minADE.compute()
+                log.info(f"Added ADE metric: {epoch_wosac_metrics['val_closed/ADE']}")
+                
                 if self.global_rank == 0:
                     epoch_wosac_metrics["epoch"] = (
                         self.log_epoch if self.log_epoch >= 0 else self.current_epoch
                     )
+                    log.info(f"Logging metrics to wandb: {epoch_wosac_metrics}")
                     self.logger.log_metrics(epoch_wosac_metrics)
+                    log.info("Metrics logged to wandb successfully")
+                else:
+                    log.info(f"Skipping wandb logging for rank {self.global_rank}")
 
                 self.wosac_metrics.reset()
                 self.minADE.reset()
-
+                log.info("Metrics reset complete")
+                
             if self.global_rank == 0:
                 if self.wosac_submission.is_active:
                     self.wosac_submission.save_sub_file()

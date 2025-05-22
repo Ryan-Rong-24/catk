@@ -2,3 +2,4 @@
 **/*.pyc
 **/logs
 **/scratch
+**/womd_env_py310
