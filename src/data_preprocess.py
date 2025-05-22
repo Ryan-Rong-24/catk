@@ -441,6 +441,27 @@ def decode_dynamic_map_states_from_proto(dynamic_map_states):
     return dynamic_map_infos
 
 
+def decode_camera_embeddings_from_proto(scenario, codebook):
+    """Extract camera embeddings from scenario proto using the codebook.
+    
+    Args:
+        scenario: scenario_pb2.Scenario proto message
+        codebook: numpy array of shape (num_tokens, embedding_dim)
+        
+    Returns:
+        List of dictionaries containing camera embeddings for each frame
+    """
+    camera_embeddings = []
+    for frame_tokens in scenario.frame_camera_tokens:
+        frame_data = {}
+        for camera in frame_tokens.camera_tokens:
+            tokens = np.array(camera.tokens, dtype=np.int64)
+            embedding = codebook[tokens]  # [256, 32]
+            frame_data[camera.camera_name] = embedding
+        camera_embeddings.append(frame_data)
+    return camera_embeddings
+
+
 def wm2argo(file_path, split, output_dir, output_dir_tfrecords_splitted):
     dataset = tf.data.TFRecordDataset(
         file_path, compression_type="", num_parallel_reads=3
@@ -502,20 +523,150 @@ def batch_process9s_transformer(input_dir, output_dir, split, num_workers):
         r = list(tqdm(p.imap_unordered(func, packages), total=len(packages)))
 
 
+def _load_scenario_data(tfrecord_file: str) -> scenario_pb2.Scenario:
+    """Load a scenario proto from a tfrecord dataset file."""
+    dataset = tf.data.TFRecordDataset(tfrecord_file, compression_type='')
+    data = next(iter(dataset))
+    return scenario_pb2.Scenario.FromString(data.numpy())
+
+
+def process_single_file(args):
+    """Process a single pickle file to add camera tokens.
+    
+    Args:
+        args: Tuple containing (pickle_file, camera_data_dir, output_dir, codebook)
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    pickle_file, camera_data_dir, output_dir, codebook = args
+    
+    try:
+        # Load existing pickle data
+        with open(pickle_file, "rb") as f:
+            data = pickle.load(f)
+            
+        # Get scenario ID from filename
+        scenario_id = pickle_file.stem
+        
+        # Load corresponding camera data
+        camera_file = camera_data_dir / f"{scenario_id}.tfrecord"
+        if not camera_file.exists():
+            print(f"Warning: No camera data found for {scenario_id}")
+            return False
+            
+        # Load camera data
+        camera_scenario = _load_scenario_data(str(camera_file))
+        camera_embeddings = decode_camera_embeddings_from_proto(camera_scenario, codebook)
+        data["camera_embeddings"] = camera_embeddings
+        output_file = output_dir / f"{scenario_id}.pkl"
+        with open(output_file, "wb") as f:
+            pickle.dump(data, f)
+        return True
+    except Exception as e:
+        print(f"Error processing {pickle_file}: {str(e)}")
+        return False
+
+
+def add_camera_tokens_to_pickle(
+    pickle_dir: Path,
+    camera_data_dir: Path,
+    output_dir: Path,
+    split: str,
+    codebook_path: str = "/womd/womd_camera_codebook.npy",
+    num_workers: int = 2,
+) -> None:
+    """Add camera tokens to existing pickle files using multiprocessing.
+    
+    Args:
+        pickle_dir: Directory containing existing pickle files
+        camera_data_dir: Directory containing camera tfrecord files
+        output_dir: Directory to save updated pickle files
+        split: Data split (train/val/test)
+        num_workers: Number of worker processes to use
+    """
+    output_dir = output_dir / split
+    output_dir.mkdir(exist_ok=True, parents=True)
+    codebook = np.load(codebook_path)
+    pickle_files = sorted(pickle_dir.glob("*.pkl"))
+    process_args = [(f, camera_data_dir, output_dir, codebook) for f in pickle_files]
+    with multiprocessing.Pool(num_workers) as p:
+        results = list(tqdm(
+            p.imap_unordered(process_single_file, process_args),
+            total=len(process_args),
+            desc="Adding camera embeddings"
+        ))
+    successful = sum(results)
+    print(f"\nProcessed {len(results)} files:")
+    print(f"Successfully added camera embeddings to {successful} files")
+    print(f"Failed to process {len(results) - successful} files")
+
+
 if __name__ == "__main__":
     parser = ArgumentParser()
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["preprocess", "add_camera"],
+        required=True,
+        help="Operation mode: 'preprocess' for scenario preprocessing, 'add_camera' for adding camera tokens",
+    )
+    
+    # Common arguments
+    parser.add_argument("--split", type=str, default="validation")
+    parser.add_argument("--num_workers", type=int, default=2,
+                       help="Number of worker processes to use")
+    
+    # Arguments for preprocessing mode
     parser.add_argument(
         "--input_dir",
         type=str,
         default="/root/workspace/data/womd/uncompressed/scenario",
+        help="Input directory for scenario data (required for preprocess mode)",
     )
     parser.add_argument(
-        "--output_dir", type=str, default="/root/workspace/data/SMART_new"
+        "--output_dir",
+        type=str,
+        default="/root/workspace/data/SMART_new",
+        help="Output directory for processed data",
     )
-    parser.add_argument("--split", type=str, default="validation")
-    parser.add_argument("--num_workers", type=int, default=2)
+    
+    # Arguments for add_camera mode
+    parser.add_argument(
+        "--pickle_dir",
+        type=str,
+        help="Directory containing existing pickle files (required for add_camera mode)",
+    )
+    parser.add_argument(
+        "--camera_data_dir",
+        type=str,
+        help="Directory containing camera tfrecord files (required for add_camera mode)",
+    )
+    parser.add_argument(
+        "--codebook_path",
+        type=str,
+        default="/womd/womd_camera_codebook.npy",
+        help="Path to camera codebook file (required for add_camera mode)",
+    )
+    
     args = parser.parse_args()
-
-    batch_process9s_transformer(
-        args.input_dir, args.output_dir, args.split, num_workers=args.num_workers
-    )
+    
+    if args.mode == "preprocess":
+        batch_process9s_transformer(
+            args.input_dir,
+            args.output_dir,
+            args.split,
+            num_workers=args.num_workers
+        )
+    else:  # add_camera mode
+        if not args.pickle_dir or not args.camera_data_dir:
+            parser.error("--pickle_dir and --camera_data_dir are required for add_camera mode")
+            
+        add_camera_tokens_to_pickle(
+            Path(args.pickle_dir),
+            Path(args.camera_data_dir),
+            Path(args.output_dir),
+            args.split,
+            codebook_path=args.codebook_path,
+            num_workers=args.num_workers
+        )

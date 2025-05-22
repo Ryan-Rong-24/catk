@@ -7,6 +7,7 @@ DATA_SPLIT=testing # training, validation, testing
 
 python \
   -m src.data_preprocess \
+  --mode preprocess \
   --split $DATA_SPLIT \
   --num_workers 12 \
   --input_dir /workspace/scratch/data/womd/uncompressed/scenario \
