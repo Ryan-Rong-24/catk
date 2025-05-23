@@ -589,6 +589,14 @@ def add_camera_tokens_to_pickle(
     output_dir.mkdir(exist_ok=True, parents=True)
     codebook = np.load(codebook_path)
     pickle_files = sorted(pickle_dir.glob("*.pkl"))
+    camera_files = set(f.stem for f in camera_data_dir.glob("*.tfrecord"))
+    pickle_ids = set(f.stem for f in pickle_files)
+
+    # Warn about camera files with no matching pkl
+    unmatched_camera = camera_files - pickle_ids
+    if unmatched_camera:
+        print(f"Warning: {len(unmatched_camera)} camera files have no matching cached pkl. They will be skipped.")
+
     process_args = [(f, camera_data_dir, output_dir, codebook) for f in pickle_files]
     with multiprocessing.Pool(num_workers) as p:
         results = list(tqdm(
@@ -597,9 +605,10 @@ def add_camera_tokens_to_pickle(
             desc="Adding camera embeddings"
         ))
     successful = sum(results)
-    print(f"\nProcessed {len(results)} files:")
+    print(f"\nProcessed {len(results)} pkl files:")
     print(f"Successfully added camera embeddings to {successful} files")
     print(f"Failed to process {len(results) - successful} files")
+    print(f"Skipped {len(unmatched_camera)} camera files with no matching pkl.")
 
 
 if __name__ == "__main__":
