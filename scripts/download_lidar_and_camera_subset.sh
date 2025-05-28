@@ -16,11 +16,8 @@ BUCKET=gs://waymo_open_dataset_motion_v_1_3_0/uncompressed/lidar_and_camera/$SPL
 
 mkdir -p "$DEST"
 
-# List all TFRecord files in the split
-gsutil ls "$BUCKET"/*.tfrecord > all_${SPLIT}.txt
-
-# Randomly select N files
-shuf all_${SPLIT}.txt | head -n $N > subset_${SPLIT}.txt
+# Randomly select N files from the existing list
+shuf womd/all_lidar_and_camera_training.txt | head -n $N > subset_${SPLIT}.txt
 
 # Download the selected files in parallel
 gsutil -m cp -I "$DEST" < subset_${SPLIT}.txt

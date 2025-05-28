@@ -573,7 +573,7 @@ def add_camera_tokens_to_pickle(
     camera_data_dir: Path,
     output_dir: Path,
     split: str,
-    codebook_path: str = "/womd/womd_camera_codebook.npy",
+    codebook_path: str = "womd/womd_camera_codebook.npy",
     num_workers: int = 2,
 ) -> None:
     """Add camera tokens to existing pickle files using multiprocessing.
@@ -588,7 +588,16 @@ def add_camera_tokens_to_pickle(
     output_dir = output_dir / split
     output_dir.mkdir(exist_ok=True, parents=True)
     codebook = np.load(codebook_path)
-    pickle_files = sorted(pickle_dir.glob("*.pkl"))
+    
+    # Read the list of valid scenario IDs from the training file
+    with open("subset_training.txt", "r") as f:
+        # Extract just the scenario ID from the GCS path
+        valid_scenario_ids = set(line.strip().split('/')[-1].replace('.tfrecord', '') for line in f)
+    
+    # Filter pickle files to only those in the training list
+    pickle_files = [f for f in sorted(pickle_dir.glob("*.pkl")) 
+                   if f.stem in valid_scenario_ids]
+    
     camera_files = set(f.stem for f in camera_data_dir.glob("*.tfrecord"))
     pickle_ids = set(f.stem for f in pickle_files)
 
@@ -654,7 +663,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--codebook_path",
         type=str,
-        default="/womd/womd_camera_codebook.npy",
+        default="womd/womd_camera_codebook.npy",
         help="Path to camera codebook file (required for add_camera mode)",
     )
     

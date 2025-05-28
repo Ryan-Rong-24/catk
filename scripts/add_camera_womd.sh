@@ -3,7 +3,7 @@ export LOGLEVEL=INFO
 export HYDRA_FULL_ERROR=1
 export TF_CPP_MIN_LOG_LEVEL=2
 
-DATA_SPLIT=testing # training, validation, testing
+DATA_SPLIT=training # training, validation, testing
 
 python \
   -m src.data_preprocess \
