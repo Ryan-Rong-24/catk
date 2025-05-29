@@ -590,7 +590,7 @@ def add_camera_tokens_to_pickle(
     codebook = np.load(codebook_path)
     
     # Read the list of valid scenario IDs from the training file
-    with open("subset_training.txt", "r") as f:
+    with open(f"womd/subset_{split}.txt", "r") as f:
         # Extract just the scenario ID from the GCS path
         valid_scenario_ids = set(line.strip().split('/')[-1].replace('.tfrecord', '') for line in f)
     

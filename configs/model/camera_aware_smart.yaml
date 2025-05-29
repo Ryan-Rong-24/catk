@@ -4,17 +4,17 @@ defaults:
 model_config:
   # Model architecture
   decoder:
-    num_heads: 4
-    head_dim: 8
+    num_heads: 8
+    head_dim: 16
     num_map_layers: 2
     num_agent_layers: 4
 
   # Camera-specific settings
-  camera_embed_dim: 32 # Dimension of codebook camera embeddings (was 256 for tokens)
+  camera_embed_dim: 128 # Dimension of codebook camera embeddings (was 256 for tokens)
   cross_attn_layers: [2] # Add cross-attention at layer 2
 
   # Finetuning settings
-  pretrained_path: "logs/pre_bc_E31.ckpt" # TODO: Path to pretrained SMART model
+  pretrained_path: "/workspace/logs/pre_bc_E31.ckpt"
   finetune:
     freeze_encoder: true # Freeze pretrained weights initially
     lr_multiplier: 0.1 # Lower learning rate for pretrained weights

@@ -14,7 +14,6 @@ MY_TASK_NAME=$MY_EXPERIMENT"-finetune"
 torchrun \
   -m src.run \
   experiment=$MY_EXPERIMENT \
-  task_name=$MY_TASK_NAME \
-  dataloader.data_dir=/scratch/cache/SMART_with_camera/training
+  task_name=$MY_TASK_NAME
 
 echo "bash train_camera.sh done!"

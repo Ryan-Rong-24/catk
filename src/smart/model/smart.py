@@ -211,7 +211,7 @@ class SMART(LightningModule):
                     log.info(f"Skipping WOSAC metrics for batch {batch_idx} (n_batch_wosac_metric: {self.n_batch_wosac_metric})")
 
             # ! visualization
-            if self.global_rank == 0 and batch_idx < self.n_vis_batch:
+            if self.global_rank == 0 and batch_idx < self.n_vis_batch and self.n_vis_batch > 0:
                 if scenario_rollouts is not None:
                     log.info(f"Generating visualizations for batch {batch_idx} (n_vis_batch: {self.n_vis_batch})...")
                     for _i_sc in range(self.n_vis_scenario):
@@ -249,8 +249,12 @@ class SMART(LightningModule):
                     epoch_wosac_metrics["epoch"] = (
                         self.log_epoch if self.log_epoch >= 0 else self.current_epoch
                     )
+                    # Convert all tensor values to floats for wandb logging
+                    for k, v in epoch_wosac_metrics.items():
+                        if isinstance(v, torch.Tensor):
+                            epoch_wosac_metrics[k] = v.item()
                     log.info(f"Logging metrics to wandb: {epoch_wosac_metrics}")
-                    self.logger.log_metrics(epoch_wosac_metrics)
+                    self.logger.log_metrics(epoch_wosac_metrics, step=self.current_epoch)
                     log.info("Metrics logged to wandb successfully")
                 else:
                     log.info(f"Skipping wandb logging for rank {self.global_rank}")

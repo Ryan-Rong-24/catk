@@ -14,7 +14,7 @@ defaults:
 
   # experiment configs allow for version control of specific hyperparameters
   # e.g. best hyperparameters for given model and datamodule
-  - experiment: pre_bc
+  - experiment: camera_aware_smart # pre_bc, camera_aware_smart
 
 action: fit # fit, finetune, validate, test
 
@@ -27,3 +27,14 @@ train_log_dir: null
 
 # seed for random number generators in pytorch, numpy and python.random
 seed: 817
+
+# Command line overrides
+hydra:
+  run:
+    dir: ${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${hydra.job.num}
+  job:
+    chdir: true
+  verbose: true

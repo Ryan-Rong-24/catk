@@ -206,7 +206,7 @@ class WOSACMetrics(Metric):
         # Print each metric value separately for clarity
         log.info("Final metrics values:")
         for k, v in out_dict.items():
-            if isinstance(v, torch.Tensor):
+            if isinstance(v, Tensor):
                 log.info(f"{k}: {v.item()}")
             else:
                 log.info(f"{k}: {v}")

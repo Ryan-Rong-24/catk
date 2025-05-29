@@ -1,0 +1,91 @@
+# @package _global_
+
+defaults:
+  - override /model: camera_aware_smart
+  - override /data: camera_aware
+
+model:
+  model_config:
+    lr: 5e-4
+    lr_min_ratio: 1e-2
+    camera_embed_dim: 32 # Original camera embedding dimension
+    hidden_dim: 128 # Match pretrained model's hidden dimension
+    num_heads: 8 # Match pretrained model's number of heads
+    head_dim: 16 # Match pretrained model's head dimension
+    cross_attn_layers: [2]
+    # Disable visualization
+    n_vis_batch: 0
+    n_vis_scenario: 0
+    n_vis_rollout: 0
+    token_processor:
+      map_token_sampling: # open-loop
+        num_k: 1 # for k nearest neighbors
+        temp: 1.0 # uniform sampling
+      agent_token_sampling: # closed-loop
+        num_k: 1 # for k nearest neighbors
+        temp: 1.0
+    training_rollout_sampling:
+      criterium: topk_prob_sampled_with_dist
+      num_k: 32
+      temp: 1e-5
+    training_loss:
+      use_gt_raw: true
+      gt_thresh_scale_length: -1
+      label_smoothing: 0.0
+      rollout_as_gt: false
+    finetune:
+      freeze_encoder: true
+      lr_multiplier: 0.1
+
+ckpt_path: /workspace/logs/pre_bc_E31.ckpt
+
+trainer:
+  limit_train_batches: 1.0
+  limit_val_batches: 0.1 # Use 10% of validation data for quick validation
+  check_val_every_n_epoch: 1
+  max_epochs: 64
+  accelerator: gpu
+  devices: 1
+  precision: 32 # Use full precision to avoid dtype mismatches
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 1
+  log_every_n_steps: 50
+  val_check_interval: 1.0
+  num_sanity_val_steps: 2 # Enable sanity check with 2 batches
+
+data:
+  train_batch_size: 4
+  val_batch_size: 4
+  test_batch_size: 4
+  num_workers: 8
+
+action: finetune
+
+# Experiment name
+name: camera_aware_smart
+
+# Data settings
+dataloader:
+  data_dir: /workspace/scratch/cache/SMART_with_camera
+  batch_size: 32
+  pin_memory: true
+
+# Logging settings
+logger:
+  name: camera_aware_smart
+  save_dir: logs
+  version: ${now:%Y-%m-%d_%H-%M-%S}
+
+# Callbacks
+callbacks:
+  model_checkpoint:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: ${logger.save_dir}/${logger.name}/${logger.version}
+    filename: camera_aware_smart-{epoch:02d}-{val_minADE:.2f}
+    monitor: val_minADE
+    mode: min
+    save_top_k: 3
+    save_last: true
+    every_n_epochs: 1
+    every_n_train_steps: null
+    train_time_interval: null
