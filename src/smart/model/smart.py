@@ -132,7 +132,7 @@ class SMART(LightningModule):
             self.log("val_open/loss", loss, on_epoch=True, sync_dist=True, batch_size=1)
             log.info("Open-loop validation complete")
 
-        # ! closed-loop vlidation
+        # ! closed-loop validation
         if self.val_closed_loop:
             log.info("Starting closed-loop validation...")
             pred_traj, pred_z, pred_head = [], [], []
@@ -244,6 +244,10 @@ class SMART(LightningModule):
                 
                 epoch_wosac_metrics["val_closed/ADE"] = self.minADE.compute()
                 log.info(f"Added ADE metric: {epoch_wosac_metrics['val_closed/ADE']}")
+
+                # Log val_minADE for ModelCheckpoint
+                self.log("val_minADE", epoch_wosac_metrics["val_closed/ADE"], prog_bar=True, sync_dist=True)
+                self.log("val_wosac_minADE", epoch_wosac_metrics["val_closed/wosac/min_ade"], prog_bar=True, sync_dist=True)
                 
                 if self.global_rank == 0:
                     epoch_wosac_metrics["epoch"] = (

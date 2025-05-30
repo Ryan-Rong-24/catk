@@ -82,7 +82,7 @@ callbacks:
     _target_: lightning.pytorch.callbacks.ModelCheckpoint
     dirpath: ${logger.save_dir}/${logger.name}/${logger.version}
     filename: camera_aware_smart-{epoch:02d}-{val_minADE:.2f}
-    monitor: val_minADE
+    monitor: val_wosac_minADE
     mode: min
     save_top_k: 3
     save_last: true
