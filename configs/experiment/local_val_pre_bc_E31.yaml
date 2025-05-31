@@ -16,7 +16,7 @@ model:
       num_k: 64 # for k most likely
       temp: 1.0
 
-ckpt_path: /workspace/logs/clsft_E9.ckpt
+ckpt_path: /workspace/logs/pre_bc_E31.ckpt
 
 trainer:
   limit_train_batches: 1.0
@@ -34,7 +34,7 @@ data:
 
 # Logging settings
 logger:
-  name: local_val
+  name: local_val_pre_bc_E31
   save_dir: logs
   version: ${now:%Y-%m-%d_%H-%M-%S}
 

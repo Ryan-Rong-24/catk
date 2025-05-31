@@ -13,5 +13,5 @@ wandb:
   entity: null
   group: ""
   tags: []
-  job_type: "training"
+  job_type: "validation"
   resume: allow
