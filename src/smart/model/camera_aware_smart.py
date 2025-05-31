@@ -1,10 +1,12 @@
 import torch
-from typing import Dict
+import torch.nn as nn
+from typing import Dict, Any
 from omegaconf import DictConfig
+from pathlib import Path
 
 from src.smart.model.smart import SMART
 from src.smart.modules.camera_aware_decoder import CameraAwareDecoder
-from src.smart.utils.finetune import set_model_for_finetuning
+from src.smart.utils.model import set_model_for_finetuning
 
 class CameraAwareSMART(SMART):
     """SMART model with camera cross-attention.
@@ -57,120 +59,54 @@ class CameraAwareSMART(SMART):
         self,
         tokenized_map: Dict[str, torch.Tensor],
         tokenized_agent: Dict[str, torch.Tensor],
-        camera_embeddings: list,  # List[Dict[camera_name, np.ndarray]] - REQUIRED
+        camera_embeddings: list,  # List[Dict[camera_name, np.ndarray]]
     ) -> Dict[str, torch.Tensor]:
         """Forward pass with camera embeddings.
         Args:
             tokenized_map: Map features
             tokenized_agent: Agent features
-            camera_embeddings: List[Dict[camera_name, np.ndarray]] for each frame (REQUIRED)
+            camera_embeddings: List[Dict[camera_name, np.ndarray]] for each frame
         Returns:
             Dict containing predictions
+        Note:
+            If you want to pool over the 256 embeddings per camera, do it before passing to the model.
         """
-        if camera_embeddings is None:
-            raise ValueError("Camera embeddings are required for CameraAwareSMART. "
-                           "Use the original SMART model if you don't have camera data.")
         return self.encoder(tokenized_map, tokenized_agent, camera_embeddings)
         
-    def training_step(self, data, batch_idx):
-        """Override SMART training step to include camera embeddings."""
-        tokenized_map, tokenized_agent = self.token_processor(data)
+    def training_step(self, batch: Dict[str, Any], batch_idx: int) -> torch.Tensor:
+        """Training step with camera tokens.
         
-        # Extract camera embeddings from data - required for camera-aware model
-        camera_embeddings = data.get("camera_embeddings", None)
-        if camera_embeddings is None:
-            raise ValueError("Camera embeddings not found in data. Ensure you are using camera-aware datasets "
-                           "processed with 'add_camera' mode. Use the original SMART model for non-camera data.")
-        
-        if self.training_rollout_sampling.num_k <= 0:
-            pred = self.encoder(tokenized_map, tokenized_agent, camera_embeddings)
-        else:
-            pred = self.encoder.inference(
-                tokenized_map,
-                tokenized_agent,
-                sampling_scheme=self.training_rollout_sampling,
-                camera_embeddings=camera_embeddings,
-            )
-
-        loss = self.training_loss(
-            **pred,
-            token_agent_shape=tokenized_agent["token_agent_shape"],
-            token_traj=tokenized_agent["token_traj"],
-            train_mask=data["agent"]["train_mask"],
-            current_epoch=self.current_epoch,
+        Args:
+            batch: Batch of data including camera tokens
+            batch_idx: Batch index
+            
+        Returns:
+            Loss tensor
+        """
+        pred_dict = self(
+            batch["tokenized_map"],
+            batch["tokenized_agent"],
+            batch["camera_tokens"],
         )
-        self.log("train/loss", loss, on_step=True, batch_size=1)
+        loss = self.training_loss(pred_dict)
+        self.log("train_loss", loss)
         return loss
         
-    def validation_step(self, data, batch_idx):
-        """Override SMART validation step to include camera embeddings."""
-        # Use parent validation logic but with camera-aware encoder
-        tokenized_map, tokenized_agent = self.token_processor(data)
-        camera_embeddings = data.get("camera_embeddings", None)
-        if camera_embeddings is None:
-            raise ValueError("Camera embeddings not found in data. Ensure you are using camera-aware datasets "
-                           "processed with 'add_camera' mode. Use the original SMART model for non-camera data.")
-
-        # Open-loop validation
-        if self.val_open_loop:
-            pred = self.encoder(tokenized_map, tokenized_agent, camera_embeddings)
-            loss = self.training_loss(
-                **pred,
-                token_agent_shape=tokenized_agent["token_agent_shape"],
-                token_traj=tokenized_agent["token_traj"],
-            )
-
-            self.TokenCls.update(
-                pred=pred["next_token_logits"],
-                pred_valid=pred["next_token_valid"],
-                target=tokenized_agent["gt_idx"][:, 2:],
-                target_valid=tokenized_agent["valid_mask"][:, 2:],
-            )
-            self.log("val_open/acc", self.TokenCls, on_epoch=True, sync_dist=True, batch_size=1)
-            self.log("val_open/loss", loss, on_epoch=True, sync_dist=True, batch_size=1)
-
-        # Closed-loop validation  
+    def validation_step(self, batch: Dict[str, Any], batch_idx: int):
+        """Validation step with camera tokens.
+        
+        Args:
+            batch: Batch of data including camera tokens
+            batch_idx: Batch index
+        """
+        pred_dict = self(
+            batch["tokenized_map"],
+            batch["tokenized_agent"],
+            batch["camera_tokens"],
+        )
+        
+        # Log metrics
+        self.minADE(pred_dict)
+        self.TokenCls(pred_dict)
         if self.val_closed_loop:
-            pred_traj, pred_z, pred_head = [], [], []
-            for i in range(self.n_rollout_closed_val):
-                pred = self.encoder.inference(
-                    tokenized_map, tokenized_agent, self.validation_rollout_sampling,
-                    camera_embeddings=camera_embeddings
-                )
-                pred_traj.append(pred["pred_traj_10hz"])
-                pred_z.append(pred["pred_z_10hz"])
-                pred_head.append(pred["pred_head_10hz"])
-
-            pred_traj = torch.stack(pred_traj, dim=1)
-            pred_z = torch.stack(pred_z, dim=1)
-            pred_head = torch.stack(pred_head, dim=1)
-
-            # Continue with existing WOSAC evaluation logic
-            scenario_rollouts = None
-            if self.wosac_submission.is_active:
-                self.wosac_submission.update(
-                    scenario_id=data["scenario_id"],
-                    agent_id=data["agent"]["id"],
-                    agent_batch=data["agent"]["batch"],
-                    pred_traj=pred_traj,
-                    pred_z=pred_z,
-                    pred_head=pred_head,
-                    global_rank=self.global_rank,
-                )
-                _gpu_dict_sync = self.wosac_submission.compute()
-                if self.global_rank == 0:
-                    for k in _gpu_dict_sync.keys():
-                        if type(_gpu_dict_sync[k]) is list:
-                            _gpu_dict_sync[k] = _gpu_dict_sync[k][0]
-                    from src.utils.wosac_utils import get_scenario_rollouts
-                    scenario_rollouts = get_scenario_rollouts(**_gpu_dict_sync)
-                    self.wosac_submission.aggregate_rollouts(scenario_rollouts)
-                self.wosac_submission.reset()
-            else:
-                self.minADE.update(
-                    pred=pred_traj,
-                    target=data["agent"]["position"][:, self.num_historical_steps :, : pred_traj.shape[-1]],
-                    target_valid=data["agent"]["valid_mask"][:, self.num_historical_steps :],
-                )
-                # Add WOSAC metrics computation if needed
-                # ... (rest of parent validation logic) 
+            self.wosac_metrics(pred_dict) 

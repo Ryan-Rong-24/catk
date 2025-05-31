@@ -55,10 +55,6 @@ class MultiDataset(Dataset):
         with open(self.raw_paths[idx], "rb") as handle:
             data = pickle.load(handle)
 
-        # Camera embeddings handling - set to None if not present for backward compatibility
-        if "camera_embeddings" not in data:
-            data["camera_embeddings"] = None
-
         if self._tfrecord_dir is not None:
             data["tfrecord_path"] = (
                 self._tfrecord_dir / (data["scenario_id"] + ".tfrecords")
