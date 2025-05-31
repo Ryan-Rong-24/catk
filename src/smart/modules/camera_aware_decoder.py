@@ -3,7 +3,7 @@ import torch.nn as nn
 from typing import Dict, Optional
 
 from src.smart.modules.smart_decoder import SMARTDecoder
-from src.smart.modules.attention import AttentionLayer
+from src.smart.layers.attention_layer import AttentionLayer
 
 class CameraAwareDecoder(SMARTDecoder):
     """SMART decoder with camera cross-attention.
@@ -77,40 +77,85 @@ class CameraAwareDecoder(SMARTDecoder):
         self, 
         tokenized_map: Dict[str, torch.Tensor], 
         tokenized_agent: Dict[str, torch.Tensor],
-        camera_embeddings: list,  # <-- now expects list of dicts of numpy arrays [256, 32]
+        camera_embeddings: list = None,  # List[Dict[camera_name, np.ndarray]] for each frame
     ) -> Dict[str, torch.Tensor]:
         """Forward pass with camera cross-attention.
         Args:
             tokenized_map: Map features
             tokenized_agent: Agent features
-            camera_embeddings: List[Dict[camera_name, np.ndarray]] for each frame
+            camera_embeddings: List[Dict[camera_name, np.ndarray]] for each frame (optional)
         Returns:
             Dict containing predictions
         """
         # Get map features
         map_feature = self.map_encoder(tokenized_map)
+        
+        # Camera embeddings are required for camera-aware model
+        if camera_embeddings is None:
+            raise ValueError("Camera embeddings are required for CameraAwareDecoder. "
+                           "Use the original SMARTDecoder if you don't have camera data.")
+        
         # Process camera embeddings
-        camera_emb_list = []
-        for frame in camera_embeddings:
-            # TODO: If you want to pool over tokens, do it here:
-            # pooled = np.mean(emb, axis=0)  # [32]
-            # frame_emb = torch.stack([
-            #     self.camera_proj(torch.from_numpy(pooled))
-            #     for emb in frame.values()
-            # ])
-            # For now, keep all 256 embeddings per camera
-            frame_emb = torch.stack([
-                self.camera_proj(torch.from_numpy(emb))  # emb: [256, 32] -> [256, hidden_dim]
-                for emb in frame.values()
-            ])  # [num_cameras, 256, hidden_dim]
-            camera_emb_list.append(frame_emb)
-        camera_emb_tensor = torch.stack(camera_emb_list)  # [num_frames, num_cameras, 256, hidden_dim]
-        # Pass to agent encoder (update agent encoder to expect this shape)
-        pred_dict = self.agent_encoder(
+        processed_camera = self._process_camera_embeddings(camera_embeddings)
+        
+        # Pass to agent encoder
+        return self.agent_encoder(
             tokenized_agent, 
             map_feature,
-            camera_embeddings=camera_emb_tensor,
+            camera_embeddings=processed_camera,
             cross_attn_layers=self.cross_attn_layers,
         )
+    
+    def _process_camera_embeddings(self, camera_embeddings: list) -> torch.Tensor:
+        """Process camera embeddings into tensor format.
         
-        return pred_dict 
+        Args:
+            camera_embeddings: List[Dict[camera_name, np.ndarray]] for each frame
+            
+        Returns:
+            Processed camera tensor [num_frames, num_cameras, 256, hidden_dim]
+        """
+        
+        camera_emb_list = []
+        for frame_idx, frame in enumerate(camera_embeddings):
+            if frame is None:
+                raise ValueError(f"Frame {frame_idx} contains None camera embeddings. "
+                               f"All frames must contain valid camera data.")
+            if not isinstance(frame, dict) or len(frame) == 0:
+                raise ValueError(f"Frame {frame_idx} contains invalid camera embeddings. "
+                               f"Expected non-empty dict, got {type(frame)}.")
+            
+            frame_emb = torch.stack([
+                self.camera_proj(torch.from_numpy(emb).float())  # emb: [256, 32] -> [256, hidden_dim]
+                for camera_name, emb in frame.items()
+            ])  # [num_cameras, 256, hidden_dim]
+            camera_emb_list.append(frame_emb)
+        
+        if len(camera_emb_list) == 0:
+            raise ValueError("No valid camera embeddings found in any frame.")
+            
+        return torch.stack(camera_emb_list)  # [num_frames, num_cameras, 256, hidden_dim]
+    
+    def inference(
+        self,
+        tokenized_map: Dict[str, torch.Tensor],
+        tokenized_agent: Dict[str, torch.Tensor],
+        sampling_scheme,
+        camera_embeddings: list = None,
+    ) -> Dict[str, torch.Tensor]:
+        """Inference with camera embeddings."""
+        map_feature = self.map_encoder(tokenized_map)
+        
+        if camera_embeddings is None:
+            raise ValueError("Camera embeddings are required for CameraAwareDecoder inference. "
+                           "Use the original SMARTDecoder if you don't have camera data.")
+        
+        # Process camera embeddings
+        processed_camera = self._process_camera_embeddings(camera_embeddings)
+        
+        # Pass to agent encoder inference
+        return self.agent_encoder.inference(
+            tokenized_agent, map_feature, sampling_scheme, 
+            camera_embeddings=processed_camera,
+            cross_attn_layers=self.cross_attn_layers
+        ) 
