@@ -31,3 +31,4 @@ model_config:
   n_vis_batch: 1
   n_vis_scenario: 1
   n_vis_rollout: 1
+  n_batch_wosac_metric: 2  # Keep WOSAC metrics enabled
