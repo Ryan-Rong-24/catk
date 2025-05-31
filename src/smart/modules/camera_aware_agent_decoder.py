@@ -218,6 +218,109 @@ class CameraAwareAgentDecoder(SMARTAgentDecoder):
             raise ValueError("Camera features are required for CameraAwareAgentDecoder inference. "
                            "Use the original SMARTAgentDecoder if you don't have camera data.")
         
-        # For now, fallback to parent inference 
-        # TODO: Implement camera-aware autoregressive generation
-        return super().inference(tokenized_agent, map_feature, sampling_scheme) 
+        # Camera-aware autoregressive generation
+        # For inference, we use the same forward pass but with autoregressive sampling
+        
+        mask = tokenized_agent["valid_mask"]
+        pos_a = tokenized_agent["sampled_pos"]
+        head_a = tokenized_agent["sampled_heading"]
+        head_vector_a = torch.stack([head_a.cos(), head_a.sin()], dim=-1)
+        n_agent, n_step = head_a.shape
+
+        # Get agent token embeddings (same as forward)
+        feat_a = self.agent_token_embedding(
+            agent_token_index=tokenized_agent["sampled_idx"],
+            trajectory_token_veh=tokenized_agent["trajectory_token_veh"],
+            trajectory_token_ped=tokenized_agent["trajectory_token_ped"],
+            trajectory_token_cyc=tokenized_agent["trajectory_token_cyc"],
+            pos_a=pos_a,
+            head_vector_a=head_vector_a,
+            agent_type=tokenized_agent["type"],
+            agent_shape=tokenized_agent["shape"],
+            inference=True,  # Important: set inference=True
+        )
+
+        # Build edges (same as forward)
+        edge_index_t, r_t = self.build_temporal_edge(
+            pos_a=pos_a,
+            head_a=head_a,
+            head_vector_a=head_vector_a,
+            mask=mask,
+        )
+
+        batch_s = torch.cat(
+            [
+                tokenized_agent["batch"] + tokenized_agent["num_graphs"] * t
+                for t in range(n_step)
+            ],
+            dim=0,
+        )
+        batch_pl = torch.cat(
+            [
+                map_feature["batch"] + tokenized_agent["num_graphs"] * t
+                for t in range(n_step)
+            ],
+            dim=0,
+        )
+
+        edge_index_a2a, r_a2a = self.build_interaction_edge(
+            pos_a=pos_a,
+            head_a=head_a,
+            head_vector_a=head_vector_a,
+            batch_s=batch_s,
+            mask=mask,
+        )
+
+        edge_index_pl2a, r_pl2a = self.build_map2agent_edge(
+            pos_pl=map_feature["position"],
+            orient_pl=map_feature["orientation"],
+            pos_a=pos_a,
+            head_a=head_a,
+            head_vector_a=head_vector_a,
+            mask=mask,
+            batch_s=batch_s,
+            batch_pl=batch_pl,
+        )
+
+        # Prepare features (same as forward)
+        feat_map = (
+            map_feature["pt_token"].unsqueeze(0).expand(n_step, -1, -1).flatten(0, 1)
+        )
+        feat_cam = camera_feature["camera_token"]
+
+        # Attention layers with camera cross-attention (same as forward)
+        for i in range(self.num_layers):
+            feat_a = feat_a.flatten(0, 1)
+            feat_a = self.t_attn_layers[i](feat_a, r_t, edge_index_t)
+            feat_a = feat_a.view(n_agent, n_step, -1).transpose(0, 1).flatten(0, 1)
+            feat_a = self.pt2a_attn_layers[i](
+                (feat_map, feat_a), r_pl2a, edge_index_pl2a
+            )
+            feat_a = self.a2a_attn_layers[i](feat_a, r_a2a, edge_index_a2a)
+            
+            # Apply camera cross-attention if this layer has it
+            if self.cross_attn_layers[i] is not None:
+                n_agent_flat = feat_a.shape[0]
+                n_cam = feat_cam.shape[0]
+                
+                edge_index_cam2a = torch.stack([
+                    torch.arange(n_cam, device=feat_a.device).repeat(n_agent_flat),
+                    torch.arange(n_agent_flat, device=feat_a.device).repeat_interleave(n_cam)
+                ])
+                
+                feat_a = self.cross_attn_layers[i](
+                    (feat_cam, feat_a), None, edge_index_cam2a
+                )
+            
+            feat_a = feat_a.view(n_step, n_agent, -1).transpose(0, 1)
+
+        # Generate predictions with sampling
+        next_token_logits = self.token_predict_head(feat_a)
+        
+        # Apply sampling scheme for autoregressive generation
+        from src.smart.utils.rollout import rollout_smart
+        return rollout_smart(
+            logits=next_token_logits,
+            tokenized_agent=tokenized_agent,
+            sampling_scheme=sampling_scheme,
+        ) 
