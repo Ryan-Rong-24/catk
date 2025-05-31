@@ -45,7 +45,7 @@ class CameraAwareAgentDecoder(SMARTAgentDecoder):
             n_token_agent=n_token_agent,
         )
         
-        # Add cross-attention layers at specified blocks
+        # Add cross-attention layers at specified blocks 
         self.cross_attn_layers = nn.ModuleList()
         if cross_attn_layers is None:
             cross_attn_layers = [num_layers // 2]  # Default to middle layer
@@ -64,26 +64,27 @@ class CameraAwareAgentDecoder(SMARTAgentDecoder):
                 )
             else:
                 self.cross_attn_layers.append(None)
+    
                 
     def forward(
         self,
         tokenized_agent: Dict[str, torch.Tensor],
         map_feature: Dict[str, torch.Tensor],
-        camera_embeddings: torch.Tensor = None,  # [num_frames, num_cameras, 256, hidden_dim]
+        camera_feature: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
         """Forward pass with camera cross-attention.
         
         Args:
             tokenized_agent: Agent features
-            map_feature: Map features
-            camera_embeddings: [num_frames, num_cameras, 256, hidden_dim] (optional)
+            map_feature: Map features  
+            camera_feature: Processed camera embeddings tensor
             
         Returns:
             Dict containing predictions
         """
-        # Camera embeddings are required for camera-aware agent decoder
-        if camera_embeddings is None:
-            raise ValueError("Camera embeddings are required for CameraAwareAgentDecoder. "
+        # Camera features are required for camera-aware agent decoder
+        if camera_feature is None:
+            raise ValueError("Camera features are required for CameraAwareAgentDecoder. "
                            "Use the original SMARTAgentDecoder if you don't have camera data.")
         mask = tokenized_agent["valid_mask"]
         pos_a = tokenized_agent["sampled_pos"]
@@ -145,10 +146,16 @@ class CameraAwareAgentDecoder(SMARTAgentDecoder):
             batch_pl=batch_pl,
         )
 
+        # Camera features don't need edge building - they use global attention
+        # Each agent attends to all camera features from its batch
+
         # Attention layers with camera cross-attention
         feat_map = (
             map_feature["pt_token"].unsqueeze(0).expand(n_step, -1, -1).flatten(0, 1)
         )
+        
+        # Camera features - simple tensor, no temporal expansion needed yet
+        feat_cam = camera_feature["camera_token"]  # [total_camera_features, hidden_dim]
 
         for i in range(self.num_layers):
             feat_a = feat_a.flatten(0, 1)
@@ -161,30 +168,24 @@ class CameraAwareAgentDecoder(SMARTAgentDecoder):
             
             # Apply camera cross-attention if this layer has it
             if self.cross_attn_layers[i] is not None:
-                # Reshape features for cross-attention
-                feat_a_reshaped = feat_a.view(n_step, n_agent, -1).transpose(0, 1)  # [n_agent, n_step, hidden_dim]
+                # Simple global attention: each agent attends to all camera features from its batch
+                # Create global edges: each agent connects to all camera features
+                n_agent_flat = feat_a.shape[0]  # n_step * n_agent
+                n_cam = feat_cam.shape[0]
                 
-                # Get camera features for current temporal context
-                # Use the middle frame or interpolate if needed
-                frame_idx = min(i % camera_embeddings.shape[0], camera_embeddings.shape[0] - 1)
-                curr_camera = camera_embeddings[frame_idx]  # [num_cameras, 256, hidden_dim]
-                
-                # Flatten camera features for attention
-                camera_flat = curr_camera.reshape(-1, curr_camera.shape[-1])  # [num_cameras*256, hidden_dim]
-                
-                # Create dummy edge indices for bipartite attention
-                n_agent_feat = feat_a_reshaped.shape[0] * feat_a_reshaped.shape[1]
-                n_camera_feat = camera_flat.shape[0]
-                edge_index_cam = torch.stack([
-                    torch.arange(n_camera_feat, device=feat_a.device).repeat(n_agent_feat),
-                    torch.arange(n_agent_feat, device=feat_a.device).repeat_interleave(n_camera_feat)
+                # Create edge indices for full bipartite graph (all cameras to all agents)
+                edge_index_cam2a = torch.stack([
+                    torch.arange(n_cam, device=feat_a.device).repeat(n_agent_flat),  # camera indices
+                    torch.arange(n_agent_flat, device=feat_a.device).repeat_interleave(n_cam)  # agent indices
                 ])
                 
+                # No edge features needed for global attention
+                r_cam2a = None
+                
                 # Apply cross-attention
-                feat_a_cross = self.cross_attn_layers[i](
-                    (camera_flat, feat_a_reshaped.flatten(0, 1)), None, edge_index_cam
+                feat_a = self.cross_attn_layers[i](
+                    (feat_cam, feat_a), r_cam2a, edge_index_cam2a
                 )
-                feat_a = feat_a_cross.view(n_agent, n_step, -1).transpose(0, 1).flatten(0, 1)
             
             feat_a = feat_a.view(n_step, n_agent, -1).transpose(0, 1)
 
@@ -210,14 +211,13 @@ class CameraAwareAgentDecoder(SMARTAgentDecoder):
         tokenized_agent: Dict[str, torch.Tensor],
         map_feature: Dict[str, torch.Tensor],
         sampling_scheme,
-        camera_embeddings: torch.Tensor = None,
+        camera_feature: Dict[str, torch.Tensor],
     ) -> Dict[str, torch.Tensor]:
-        """Inference with optional camera embeddings."""
-        if camera_embeddings is None:
-            raise ValueError("Camera embeddings are required for CameraAwareAgentDecoder inference. "
+        """Inference with camera features."""
+        if camera_feature is None:
+            raise ValueError("Camera features are required for CameraAwareAgentDecoder inference. "
                            "Use the original SMARTAgentDecoder if you don't have camera data.")
         
-        # For now, fallback to parent inference for camera-aware rollouts
-        # This would need to be implemented to properly handle temporal camera features
-        # during autoregressive generation
+        # For now, fallback to parent inference 
+        # TODO: Implement camera-aware autoregressive generation
         return super().inference(tokenized_agent, map_feature, sampling_scheme) 

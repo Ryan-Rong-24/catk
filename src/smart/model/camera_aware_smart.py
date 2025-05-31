@@ -1,10 +1,13 @@
 import torch
 from typing import Dict
 from omegaconf import DictConfig
+import logging
 
 from src.smart.model.smart import SMART
 from src.smart.modules.camera_aware_decoder import CameraAwareDecoder
 from src.smart.utils.finetune import set_model_for_finetuning
+
+log = logging.getLogger(__name__)
 
 class CameraAwareSMART(SMART):
     """SMART model with camera cross-attention.
@@ -149,37 +152,25 @@ class CameraAwareSMART(SMART):
         
     def validation_step(self, data, batch_idx):
         """Override SMART validation step to include camera embeddings."""
-        # Use parent validation logic but with camera-aware encoder
+        log.info(f"Starting validation step {batch_idx} on rank {self.global_rank}")
+        log.info(f"Wandb logger available: {self.logger is not None}")
+        if self.logger is not None:
+            log.info(f"Wandb logger type: {type(self.logger)}")
+        
+        log.info("Tokenizing map and agent data...")
         tokenized_map, tokenized_agent = self.token_processor(data)
+        log.info("Tokenization complete")
+        
+        # Get camera embeddings from data
         batch_camera_embeddings = data.get("camera_embeddings", None)
         if batch_camera_embeddings is None:
             raise ValueError("Camera embeddings not found in data. Ensure you are using camera-aware datasets "
                            "processed with 'add_camera' mode. Use the original SMART model for non-camera data.")
 
-        # Process camera embeddings for the batch
-        processed_camera_batch = []
-        for sample_camera_embeddings in batch_camera_embeddings:
-            processed_camera_batch.append(sample_camera_embeddings)
-
         # Open-loop validation
         if self.val_open_loop:
-            # Process each sample individually due to per-sample camera embeddings
-            pred_list = []
-            for i in range(len(processed_camera_batch)):
-                sample_tokenized_map = {k: v[i:i+1] for k, v in tokenized_map.items()}
-                # Reset batch indices to 0 for single sample processing
-                if "batch" in sample_tokenized_map:
-                    sample_tokenized_map["batch"] = torch.zeros_like(sample_tokenized_map["batch"])
-                
-                sample_tokenized_agent = {k: v[i:i+1] if isinstance(v, torch.Tensor) and v.shape[0] == len(processed_camera_batch) else v for k, v in tokenized_agent.items()}
-                # Reset batch indices to 0 for single sample processing  
-                if "batch" in sample_tokenized_agent:
-                    sample_tokenized_agent["batch"] = torch.zeros_like(sample_tokenized_agent["batch"])
-                
-                sample_pred = self.encoder(sample_tokenized_map, sample_tokenized_agent, processed_camera_batch[i])
-                pred_list.append(sample_pred)
-            
-            pred = self._combine_batch_predictions(pred_list)
+            log.info("Running open-loop validation...")
+            pred = self.encoder(tokenized_map, tokenized_agent, batch_camera_embeddings)
             loss = self.training_loss(
                 **pred,
                 token_agent_shape=tokenized_agent["token_agent_shape"],
@@ -187,49 +178,44 @@ class CameraAwareSMART(SMART):
             )
 
             self.TokenCls.update(
-                pred=pred["next_token_logits"],
-                pred_valid=pred["next_token_valid"],
+                # action that goes from [(10->15), ..., (85->90)]
+                pred=pred["next_token_logits"],  # [n_agent, 16, n_token]
+                pred_valid=pred["next_token_valid"],  # [n_agent, 16]
                 target=tokenized_agent["gt_idx"][:, 2:],
                 target_valid=tokenized_agent["valid_mask"][:, 2:],
             )
-            self.log("val_open/acc", self.TokenCls, on_epoch=True, sync_dist=True, batch_size=1)
+            self.log(
+                "val_open/acc",
+                self.TokenCls,
+                on_epoch=True,
+                sync_dist=True,
+                batch_size=1,
+            )
             self.log("val_open/loss", loss, on_epoch=True, sync_dist=True, batch_size=1)
+            log.info("Open-loop validation complete")
 
-        # Closed-loop validation  
+        # Closed-loop validation
         if self.val_closed_loop:
+            log.info("Starting closed-loop validation...")
             pred_traj, pred_z, pred_head = [], [], []
-            for _ in range(self.n_rollout_closed_val):
-                # Process each sample individually for inference rollouts
-                pred_list = []
-                for i in range(len(processed_camera_batch)):
-                    sample_tokenized_map = {k: v[i:i+1] for k, v in tokenized_map.items()}
-                    # Reset batch indices to 0 for single sample processing
-                    if "batch" in sample_tokenized_map:
-                        sample_tokenized_map["batch"] = torch.zeros_like(sample_tokenized_map["batch"])
-                    
-                    sample_tokenized_agent = {k: v[i:i+1] if isinstance(v, torch.Tensor) and v.shape[0] == len(processed_camera_batch) else v for k, v in tokenized_agent.items()}
-                    # Reset batch indices to 0 for single sample processing
-                    if "batch" in sample_tokenized_agent:
-                        sample_tokenized_agent["batch"] = torch.zeros_like(sample_tokenized_agent["batch"])
-                    
-                    sample_pred = self.encoder.inference(
-                        sample_tokenized_map, sample_tokenized_agent, self.validation_rollout_sampling,
-                        camera_embeddings=processed_camera_batch[i]
-                    )
-                    pred_list.append(sample_pred)
-                
-                pred = self._combine_batch_predictions(pred_list)
+            for i in range(self.n_rollout_closed_val):
+                log.info(f"Running rollout {i+1}/{self.n_rollout_closed_val}")
+                pred = self.encoder.inference(
+                    tokenized_map, tokenized_agent, self.validation_rollout_sampling,
+                    camera_embeddings=batch_camera_embeddings
+                )
                 pred_traj.append(pred["pred_traj_10hz"])
                 pred_z.append(pred["pred_z_10hz"])
                 pred_head.append(pred["pred_head_10hz"])
+            log.info("All rollouts complete")
 
-            pred_traj = torch.stack(pred_traj, dim=1)
-            pred_z = torch.stack(pred_z, dim=1)
-            pred_head = torch.stack(pred_head, dim=1)
+            pred_traj = torch.stack(pred_traj, dim=1)  # [n_ag, n_rollout, n_step, 2]
+            pred_z = torch.stack(pred_z, dim=1)  # [n_ag, n_rollout, n_step]
+            pred_head = torch.stack(pred_head, dim=1)  # [n_ag, n_rollout, n_step]
 
-            # Continue with existing WOSAC evaluation logic
+            # WOSAC
             scenario_rollouts = None
-            if self.wosac_submission.is_active:
+            if self.wosac_submission.is_active:  # save WOSAC submission
                 self.wosac_submission.update(
                     scenario_id=data["scenario_id"],
                     agent_id=data["agent"]["id"],
@@ -269,6 +255,22 @@ class CameraAwareSMART(SMART):
                     )
                     self.wosac_metrics.update(data["tfrecord_path"], scenario_rollouts)
 
-            # Visualization (skip for simplicity during debugging)
-            # if self.global_rank == 0 and batch_idx < self.n_vis_batch:
-            #     # Add visualization logic if needed 
+            # visualization
+            if self.global_rank == 0 and batch_idx < self.n_vis_batch and self.n_vis_batch > 0:
+                if scenario_rollouts is not None:
+                    for _i_sc in range(self.n_vis_scenario):
+                        from src.utils.vis_waymo import VisWaymo
+                        _vis = VisWaymo(
+                            scenario_path=data["tfrecord_path"][_i_sc],
+                            save_dir=self.video_dir
+                            / f"batch_{batch_idx:02d}-scenario_{_i_sc:02d}",
+                        )
+                        _vis.save_video_scenario_rollout(
+                            scenario_rollouts[_i_sc], self.n_vis_rollout
+                        )
+                        for _path in _vis.video_paths:
+                            self.logger.log_video(
+                                "/".join(_path.split("/")[-3:]), [_path]
+                            )
+
+        log.info(f"Validation step {batch_idx} complete")

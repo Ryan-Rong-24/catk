@@ -77,17 +77,17 @@ class CameraAwareDecoder(SMARTDecoder):
         self, 
         tokenized_map: Dict[str, torch.Tensor], 
         tokenized_agent: Dict[str, torch.Tensor],
-        camera_embeddings: list = None,  # List[Dict[camera_name, np.ndarray]] for each frame
+        camera_embeddings: list = None,
     ) -> Dict[str, torch.Tensor]:
         """Forward pass with camera cross-attention.
         Args:
             tokenized_map: Map features
-            tokenized_agent: Agent features
-            camera_embeddings: List[Dict[camera_name, np.ndarray]] for each frame (optional)
+            tokenized_agent: Agent features  
+            camera_embeddings: Batch camera embeddings
         Returns:
             Dict containing predictions
         """
-        # Get map features
+        # Get map features (same as SMART)
         map_feature = self.map_encoder(tokenized_map)
         
         # Camera embeddings are required for camera-aware model
@@ -95,58 +95,66 @@ class CameraAwareDecoder(SMARTDecoder):
             raise ValueError("Camera embeddings are required for CameraAwareDecoder. "
                            "Use the original SMARTDecoder if you don't have camera data.")
         
-        
-        # Process camera embeddings
+        # Process camera embeddings - convert to tensor format
         processed_camera = self._process_camera_embeddings(camera_embeddings)
         
-        # Pass to camera-aware agent encoder
-        return self.agent_encoder(
-            tokenized_agent, 
-            map_feature,
-            camera_embeddings=processed_camera,
-        )
+        # Pass to camera-aware agent encoder (same pattern as SMART)
+        return self.agent_encoder(tokenized_agent, map_feature, processed_camera)
     
-    def _process_camera_embeddings(self, camera_embeddings: list) -> torch.Tensor:
-        """Process camera embeddings into tensor format.
+    def _process_camera_embeddings(self, camera_embeddings: list) -> Dict[str, torch.Tensor]:
+        """Process camera embeddings into simple tensor format.
         
         Args:
-            camera_embeddings: List[Dict[camera_name, np.ndarray]] for each frame
+            camera_embeddings: Batch of camera embeddings [batch_size][num_frames][camera_dict]
             
         Returns:
-            Processed camera tensor [num_frames, num_cameras, 256, hidden_dim]
+            Dict with camera features for cross-attention
         """
         if camera_embeddings is None:
-            raise ValueError("Camera embeddings cannot be None. Expected list of frame dictionaries.")
+            raise ValueError("Camera embeddings cannot be None.")
         
-        if not isinstance(camera_embeddings, list):
-            raise ValueError(f"Camera embeddings must be a list, got {type(camera_embeddings)}.")
+        device = self.camera_proj.weight.device
         
-        if len(camera_embeddings) == 0:
-            raise ValueError("Camera embeddings list is empty. Need at least one frame.")
+        # Collect all camera tokens across batch and frames  
+        all_camera_tokens = []
         
-        camera_emb_list = []
-        for frame_idx, frame in enumerate(camera_embeddings):
-            if frame is None:
-                raise ValueError(f"Frame {frame_idx} contains None camera embeddings. "
-                               f"All frames must contain valid camera data.")
-            if not isinstance(frame, dict) or len(frame) == 0:
-                raise ValueError(f"Frame {frame_idx} contains invalid camera embeddings. "
-                               f"Expected non-empty dict, got {type(frame)}.")
+        for batch_idx, sample_frames in enumerate(camera_embeddings):
+            if not isinstance(sample_frames, list) or len(sample_frames) == 0:
+                raise ValueError(f"Sample {batch_idx}: Expected non-empty list of frames")
             
-            # Validate that all values are numpy arrays with correct shape
-            for camera_id, emb in frame.items():
-                if not isinstance(emb, np.ndarray):
-                    raise ValueError(f"Frame {frame_idx}, camera {camera_id}: expected numpy array, got {type(emb)}")
-                if emb.shape != (256, 32):
-                    raise ValueError(f"Frame {frame_idx}, camera {camera_id}: expected shape (256, 32), got {emb.shape}")
+            # For now, just use the first frame's camera data
+            # TODO: Handle temporal camera data properly
+            frame_dict = sample_frames[0]  # Use first frame
             
-            frame_emb = torch.stack([
-                self.camera_proj(torch.from_numpy(emb).float().to(self.camera_proj.weight.device))  # emb: [256, 32] -> [256, hidden_dim]
-                for camera_id, emb in frame.items()
-            ])  # [num_cameras, 256, hidden_dim]
-            camera_emb_list.append(frame_emb)
+            if not isinstance(frame_dict, dict) or len(frame_dict) == 0:
+                raise ValueError(f"Sample {batch_idx}, Frame 0: Expected non-empty dict")
+            
+            # Process each camera in this frame
+            for camera_id, camera_emb in frame_dict.items():
+                if not isinstance(camera_emb, np.ndarray):
+                    raise ValueError(f"Sample {batch_idx}, Camera {camera_id}: expected numpy array")
+                if camera_emb.shape != (256, 32):
+                    raise ValueError(f"Sample {batch_idx}, Camera {camera_id}: expected shape (256, 32), got {camera_emb.shape}")
+                
+                # Convert camera embedding to tensor and project to hidden dim
+                camera_tensor = torch.from_numpy(camera_emb).float().to(device)  # [256, 32]
+                camera_projected = self.camera_proj(camera_tensor)  # [256, hidden_dim]
+                
+                # Take mean pooling to get one feature per camera
+                camera_feature = camera_projected.mean(dim=0)  # [hidden_dim]
+                all_camera_tokens.append(camera_feature)
         
-        return torch.stack(camera_emb_list)  # [num_frames, num_cameras, 256, hidden_dim]
+        if len(all_camera_tokens) == 0:
+            raise ValueError("No camera tokens found in camera embeddings")
+        
+        # Stack all camera tokens
+        camera_tokens = torch.stack(all_camera_tokens)  # [total_cameras, hidden_dim]
+        
+        camera_features = {
+            "camera_token": camera_tokens,  # [total_cameras, hidden_dim]
+        }
+        
+        return camera_features
     
     def inference(
         self,
@@ -156,6 +164,7 @@ class CameraAwareDecoder(SMARTDecoder):
         camera_embeddings: list = None,
     ) -> Dict[str, torch.Tensor]:
         """Inference with camera embeddings."""
+        # Get map features (same as SMART)
         map_feature = self.map_encoder(tokenized_map)
         
         if camera_embeddings is None:
@@ -165,8 +174,5 @@ class CameraAwareDecoder(SMARTDecoder):
         # Process camera embeddings
         processed_camera = self._process_camera_embeddings(camera_embeddings)
         
-        # Pass to camera-aware agent encoder inference
-        return self.agent_encoder.inference(
-            tokenized_agent, map_feature, sampling_scheme, 
-            camera_embeddings=processed_camera,
-        ) 
+        # Pass to camera-aware agent encoder inference (same pattern as SMART)
+        return self.agent_encoder.inference(tokenized_agent, map_feature, sampling_scheme, processed_camera) 
