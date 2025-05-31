@@ -93,7 +93,21 @@ def test_camera_aware_integration():
         
         # Test camera embedding processing
         print("Debug: About to call _process_camera_embeddings...")
-        processed = decoder._process_camera_embeddings(camera_embeddings)
+        print(f"Debug: camera_embeddings before call: {camera_embeddings is not None}")
+        print(f"Debug: camera_embeddings type before call: {type(camera_embeddings)}")
+        if camera_embeddings is not None:
+            print(f"Debug: camera_embeddings length before call: {len(camera_embeddings)}")
+        
+        # Try the exact same call that works in debug_decoder.py
+        try:
+            processed = decoder._process_camera_embeddings(camera_embeddings)
+            print(f"Debug: Call successful, shape: {processed.shape}")
+        except Exception as e:
+            print(f"Debug: Call failed with error: {e}")
+            print(f"Debug: Exception type: {type(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
         expected_shape = (5, 3, 256, model_config.decoder.hidden_dim)  # frames, cameras, tokens, hidden_dim
         assert processed.shape == expected_shape, f"Expected {expected_shape}, got {processed.shape}"
         print("✓ Camera embedding processing works")
