@@ -101,15 +101,17 @@ class CameraAwareDecoder(SMARTDecoder):
         print(f"  Type: {type(camera_embeddings)}")
         if isinstance(camera_embeddings, list) and len(camera_embeddings) > 0:
             print(f"  Length: {len(camera_embeddings)}")
-            print(f"  First frame type: {type(camera_embeddings[0])}")
-            if isinstance(camera_embeddings[0], dict):
-                print(f"  First frame keys: {list(camera_embeddings[0].keys())}")
-            elif isinstance(camera_embeddings[0], list):
-                print(f"  First frame length: {len(camera_embeddings[0])}")
-                if len(camera_embeddings[0]) > 0:
-                    print(f"  First element type: {type(camera_embeddings[0][0])}")
-                    if hasattr(camera_embeddings[0][0], 'shape'):
-                        print(f"  First element shape: {camera_embeddings[0][0].shape}")
+            print(f"  First element type: {type(camera_embeddings[0])}")
+            
+        # Handle batched camera embeddings
+        # Expected: List[Dict[camera_id, np.ndarray]] - sequence of frame dicts for single sample
+        # Received: List[List[Dict[camera_id, np.ndarray]]] - batch of sequences
+        if isinstance(camera_embeddings, list) and len(camera_embeddings) > 0:
+            if isinstance(camera_embeddings[0], list):
+                # This is a batch - we need to process each sample individually
+                # For now, take the first sample (this is a temporary fix)
+                print(f"WARNING: Received batch of camera embeddings (size {len(camera_embeddings)}), processing first sample only")
+                camera_embeddings = camera_embeddings[0]
         
         # Process camera embeddings
         processed_camera = self._process_camera_embeddings(camera_embeddings)
