@@ -96,22 +96,6 @@ class CameraAwareDecoder(SMARTDecoder):
             raise ValueError("Camera embeddings are required for CameraAwareDecoder. "
                            "Use the original SMARTDecoder if you don't have camera data.")
         
-        # Debug: Log camera embeddings structure during actual training
-        print(f"\nDEBUG - Camera embeddings structure:")
-        print(f"  Type: {type(camera_embeddings)}")
-        if isinstance(camera_embeddings, list) and len(camera_embeddings) > 0:
-            print(f"  Length: {len(camera_embeddings)}")
-            print(f"  First element type: {type(camera_embeddings[0])}")
-            
-        # Handle batched camera embeddings
-        # Expected: List[Dict[camera_id, np.ndarray]] - sequence of frame dicts for single sample
-        # Received: List[List[Dict[camera_id, np.ndarray]]] - batch of sequences
-        if isinstance(camera_embeddings, list) and len(camera_embeddings) > 0:
-            if isinstance(camera_embeddings[0], list):
-                # This is a batch - we need to process each sample individually
-                # For now, take the first sample (this is a temporary fix)
-                print(f"WARNING: Received batch of camera embeddings (size {len(camera_embeddings)}), processing first sample only")
-                camera_embeddings = camera_embeddings[0]
         
         # Process camera embeddings
         processed_camera = self._process_camera_embeddings(camera_embeddings)
@@ -159,7 +143,7 @@ class CameraAwareDecoder(SMARTDecoder):
                     raise ValueError(f"Frame {frame_idx}, camera {camera_id}: expected shape (256, 32), got {emb.shape}")
             
             frame_emb = torch.stack([
-                self.camera_proj(torch.from_numpy(emb).float())  # emb: [256, 32] -> [256, hidden_dim]
+                self.camera_proj(torch.from_numpy(emb).float().to(self.camera_proj.weight.device))  # emb: [256, 32] -> [256, hidden_dim]
                 for camera_id, emb in frame.items()
             ])  # [num_cameras, 256, hidden_dim]
             camera_emb_list.append(frame_emb)
