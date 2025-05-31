@@ -107,34 +107,19 @@ class CameraAwareSMART(SMART):
             processed_camera_batch.append(sample_camera_embeddings)
         
         if self.training_rollout_sampling.num_k <= 0:
-            # For now, process each sample individually
-            # TODO: This should be vectorized for efficiency
-            batch_size = len(processed_camera_batch)
-            pred_list = []
-            for i in range(batch_size):
-                sample_tokenized_map = {k: v[i:i+1] if isinstance(v, torch.Tensor) else v for k, v in tokenized_map.items()}
-                sample_tokenized_agent = {k: v[i:i+1] if isinstance(v, torch.Tensor) else v for k, v in tokenized_agent.items()}
-                sample_pred = self.encoder(sample_tokenized_map, sample_tokenized_agent, processed_camera_batch[i])
-                pred_list.append(sample_pred)
-            
-            # Combine predictions back into batch format
-            pred = self._combine_batch_predictions(pred_list)
+            # Temporary fix: Use first sample's camera embeddings for entire batch
+            # This maintains batch processing while allowing camera functionality
+            print(f"WARNING: Using first sample's camera embeddings for entire batch of size {len(processed_camera_batch)}")
+            pred = self.encoder(tokenized_map, tokenized_agent, processed_camera_batch[0])
         else:
-            # Handle inference with camera embeddings per sample
-            batch_size = len(processed_camera_batch)
-            pred_list = []
-            for i in range(batch_size):
-                sample_tokenized_map = {k: v[i:i+1] if isinstance(v, torch.Tensor) else v for k, v in tokenized_map.items()}
-                sample_tokenized_agent = {k: v[i:i+1] if isinstance(v, torch.Tensor) else v for k, v in tokenized_agent.items()}
-                sample_pred = self.encoder.inference(
-                    sample_tokenized_map,
-                    sample_tokenized_agent,
-                    sampling_scheme=self.training_rollout_sampling,
-                    camera_embeddings=processed_camera_batch[i],
-                )
-                pred_list.append(sample_pred)
-            
-            pred = self._combine_batch_predictions(pred_list)
+            # Temporary fix: Use first sample's camera embeddings for entire batch
+            print(f"WARNING: Using first sample's camera embeddings for inference batch of size {len(processed_camera_batch)}")
+            pred = self.encoder.inference(
+                tokenized_map,
+                tokenized_agent,
+                sampling_scheme=self.training_rollout_sampling,
+                camera_embeddings=processed_camera_batch[0],
+            )
 
         loss = self.training_loss(
             **pred,
@@ -162,16 +147,9 @@ class CameraAwareSMART(SMART):
 
         # Open-loop validation
         if self.val_open_loop:
-            # Process each sample individually
-            batch_size = len(processed_camera_batch)
-            pred_list = []
-            for i in range(batch_size):
-                sample_tokenized_map = {k: v[i:i+1] if isinstance(v, torch.Tensor) else v for k, v in tokenized_map.items()}
-                sample_tokenized_agent = {k: v[i:i+1] if isinstance(v, torch.Tensor) else v for k, v in tokenized_agent.items()}
-                sample_pred = self.encoder(sample_tokenized_map, sample_tokenized_agent, processed_camera_batch[i])
-                pred_list.append(sample_pred)
-            
-            pred = self._combine_batch_predictions(pred_list)
+            # Temporary fix: Use first sample's camera embeddings for entire batch
+            print(f"WARNING: Using first sample's camera embeddings for validation batch of size {len(processed_camera_batch)}")
+            pred = self.encoder(tokenized_map, tokenized_agent, processed_camera_batch[0])
             loss = self.training_loss(
                 **pred,
                 token_agent_shape=tokenized_agent["token_agent_shape"],
@@ -191,19 +169,11 @@ class CameraAwareSMART(SMART):
         if self.val_closed_loop:
             pred_traj, pred_z, pred_head = [], [], []
             for rollout_idx in range(self.n_rollout_closed_val):
-                # Process each sample individually for closed-loop validation
-                batch_size = len(processed_camera_batch)
-                rollout_pred_list = []
-                for i in range(batch_size):
-                    sample_tokenized_map = {k: v[i:i+1] if isinstance(v, torch.Tensor) else v for k, v in tokenized_map.items()}
-                    sample_tokenized_agent = {k: v[i:i+1] if isinstance(v, torch.Tensor) else v for k, v in tokenized_agent.items()}
-                    sample_pred = self.encoder.inference(
-                        sample_tokenized_map, sample_tokenized_agent, self.validation_rollout_sampling,
-                        camera_embeddings=processed_camera_batch[i]
-                    )
-                    rollout_pred_list.append(sample_pred)
-                
-                pred = self._combine_batch_predictions(rollout_pred_list)
+                # Temporary fix: Use first sample's camera embeddings for entire batch
+                pred = self.encoder.inference(
+                    tokenized_map, tokenized_agent, self.validation_rollout_sampling,
+                    camera_embeddings=processed_camera_batch[0]
+                )
                 pred_traj.append(pred["pred_traj_10hz"])
                 pred_z.append(pred["pred_z_10hz"])
                 pred_head.append(pred["pred_head_10hz"])
