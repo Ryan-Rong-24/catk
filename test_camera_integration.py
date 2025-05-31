@@ -79,6 +79,9 @@ def test_camera_aware_integration():
             for _ in range(5)  # 5 frames
         ]
         print("✓ Mock camera embeddings created")
+        print(f"Debug: camera_embeddings type: {type(camera_embeddings)}")
+        print(f"Debug: camera_embeddings length: {len(camera_embeddings) if camera_embeddings else 'None'}")
+        print(f"Debug: first frame type: {type(camera_embeddings[0]) if camera_embeddings else 'None'}")
         
         # Test decoder with mock data
         decoder = CameraAwareDecoder(
@@ -89,6 +92,7 @@ def test_camera_aware_integration():
         )
         
         # Test camera embedding processing
+        print("Debug: About to call _process_camera_embeddings...")
         processed = decoder._process_camera_embeddings(camera_embeddings)
         expected_shape = (5, 3, 256, model_config.decoder.hidden_dim)  # frames, cameras, tokens, hidden_dim
         assert processed.shape == expected_shape, f"Expected {expected_shape}, got {processed.shape}"
@@ -99,7 +103,7 @@ def test_camera_aware_integration():
             decoder._process_camera_embeddings(None)
             assert False, "Should have raised ValueError for None camera_embeddings"
         except ValueError as e:
-            assert "required" in str(e).lower()
+            assert "cannot be None" in str(e)
             print("✓ Proper error handling for missing camera embeddings")
         
         # Test that None frame raises proper errors
@@ -110,6 +114,22 @@ def test_camera_aware_integration():
         except ValueError as e:
             assert "None camera embeddings" in str(e)
             print("✓ Proper error handling for None frames")
+        
+        # Test that empty list raises proper errors
+        try:
+            decoder._process_camera_embeddings([])
+            assert False, "Should have raised ValueError for empty list"
+        except ValueError as e:
+            assert "empty" in str(e)
+            print("✓ Proper error handling for empty camera embeddings")
+        
+        # Test that wrong type raises proper errors
+        try:
+            decoder._process_camera_embeddings("not a list")
+            assert False, "Should have raised ValueError for wrong type"
+        except ValueError as e:
+            assert "must be a list" in str(e)
+            print("✓ Proper error handling for wrong type")
         
         print("\n🎉 All integration tests passed!")
         print("\nNext steps:")

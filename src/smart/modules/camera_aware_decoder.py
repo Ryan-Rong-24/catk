@@ -115,6 +115,14 @@ class CameraAwareDecoder(SMARTDecoder):
         Returns:
             Processed camera tensor [num_frames, num_cameras, 256, hidden_dim]
         """
+        if camera_embeddings is None:
+            raise ValueError("Camera embeddings cannot be None. Expected list of frame dictionaries.")
+        
+        if not isinstance(camera_embeddings, list):
+            raise ValueError(f"Camera embeddings must be a list, got {type(camera_embeddings)}.")
+        
+        if len(camera_embeddings) == 0:
+            raise ValueError("Camera embeddings list is empty. Need at least one frame.")
         
         camera_emb_list = []
         for frame_idx, frame in enumerate(camera_embeddings):
@@ -131,9 +139,6 @@ class CameraAwareDecoder(SMARTDecoder):
             ])  # [num_cameras, 256, hidden_dim]
             camera_emb_list.append(frame_emb)
         
-        if len(camera_emb_list) == 0:
-            raise ValueError("No valid camera embeddings found in any frame.")
-            
         return torch.stack(camera_emb_list)  # [num_frames, num_cameras, 256, hidden_dim]
     
     def inference(
