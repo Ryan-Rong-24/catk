@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 from typing import Dict, Optional
 
 from src.smart.modules.smart_decoder import SMARTDecoder
@@ -133,9 +134,16 @@ class CameraAwareDecoder(SMARTDecoder):
                 raise ValueError(f"Frame {frame_idx} contains invalid camera embeddings. "
                                f"Expected non-empty dict, got {type(frame)}.")
             
+            # Validate that all values are numpy arrays with correct shape
+            for camera_id, emb in frame.items():
+                if not isinstance(emb, np.ndarray):
+                    raise ValueError(f"Frame {frame_idx}, camera {camera_id}: expected numpy array, got {type(emb)}")
+                if emb.shape != (256, 32):
+                    raise ValueError(f"Frame {frame_idx}, camera {camera_id}: expected shape (256, 32), got {emb.shape}")
+            
             frame_emb = torch.stack([
                 self.camera_proj(torch.from_numpy(emb).float())  # emb: [256, 32] -> [256, hidden_dim]
-                for camera_name, emb in frame.items()
+                for camera_id, emb in frame.items()
             ])  # [num_cameras, 256, hidden_dim]
             camera_emb_list.append(frame_emb)
         
