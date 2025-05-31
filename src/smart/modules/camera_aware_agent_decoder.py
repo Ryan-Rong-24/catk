@@ -70,7 +70,6 @@ class CameraAwareAgentDecoder(SMARTAgentDecoder):
         tokenized_agent: Dict[str, torch.Tensor],
         map_feature: Dict[str, torch.Tensor],
         camera_embeddings: torch.Tensor = None,  # [num_frames, num_cameras, 256, hidden_dim]
-        cross_attn_layers: list = None,
     ) -> Dict[str, torch.Tensor]:
         """Forward pass with camera cross-attention.
         
@@ -78,7 +77,6 @@ class CameraAwareAgentDecoder(SMARTAgentDecoder):
             tokenized_agent: Agent features
             map_feature: Map features
             camera_embeddings: [num_frames, num_cameras, 256, hidden_dim] (optional)
-            cross_attn_layers: List of cross-attention layers (optional)
             
         Returns:
             Dict containing predictions
@@ -213,7 +211,6 @@ class CameraAwareAgentDecoder(SMARTAgentDecoder):
         map_feature: Dict[str, torch.Tensor],
         sampling_scheme,
         camera_embeddings: torch.Tensor = None,
-        cross_attn_layers: list = None,
     ) -> Dict[str, torch.Tensor]:
         """Inference with optional camera embeddings."""
         if camera_embeddings is None:

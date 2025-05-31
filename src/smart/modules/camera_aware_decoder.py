@@ -4,7 +4,7 @@ import numpy as np
 from typing import Dict, Optional
 
 from src.smart.modules.smart_decoder import SMARTDecoder
-from src.smart.layers.attention_layer import AttentionLayer
+from src.smart.modules.camera_aware_agent_decoder import CameraAwareAgentDecoder
 
 class CameraAwareDecoder(SMARTDecoder):
     """SMART decoder with camera cross-attention.
@@ -33,6 +33,7 @@ class CameraAwareDecoder(SMARTDecoder):
         camera_embed_dim: int = 256,  # Dimension of raw camera embeddings
         cross_attn_layers: list = None,  # Which layers to add cross-attention
     ) -> None:
+        # Initialize parent class but we'll override the agent encoder
         super().__init__(
             hidden_dim=hidden_dim,
             num_historical_steps=num_historical_steps,
@@ -51,28 +52,26 @@ class CameraAwareDecoder(SMARTDecoder):
             n_token_agent=n_token_agent,
         )
         
+        # Replace the agent encoder with camera-aware version
+        self.agent_encoder = CameraAwareAgentDecoder(
+            hidden_dim=hidden_dim,
+            num_historical_steps=num_historical_steps,
+            num_future_steps=num_future_steps,
+            time_span=time_span,
+            pl2a_radius=pl2a_radius,
+            a2a_radius=a2a_radius,
+            num_freq_bands=num_freq_bands,
+            num_layers=num_agent_layers,
+            num_heads=num_heads,
+            head_dim=head_dim,
+            dropout=dropout,
+            hist_drop_prob=hist_drop_prob,
+            n_token_agent=n_token_agent,
+            cross_attn_layers=cross_attn_layers,
+        )
+        
         # Project camera embeddings to model dimension
         self.camera_proj = nn.Linear(camera_embed_dim, hidden_dim)
-        
-        # Add cross-attention layers at specified blocks
-        self.cross_attn_layers = nn.ModuleList()
-        if cross_attn_layers is None:
-            cross_attn_layers = [num_agent_layers // 2]  # Default to middle layer
-            
-        for i in range(num_agent_layers):
-            if i in cross_attn_layers:
-                self.cross_attn_layers.append(
-                    AttentionLayer(
-                        hidden_dim=hidden_dim,
-                        num_heads=num_heads,
-                        head_dim=head_dim,
-                        dropout=dropout,
-                        bipartite=True,  # Cross-attention is bipartite
-                        has_pos_emb=False,  # No positional encoding for camera features
-                    )
-                )
-            else:
-                self.cross_attn_layers.append(None)
                 
     def forward(
         self, 
@@ -100,12 +99,11 @@ class CameraAwareDecoder(SMARTDecoder):
         # Process camera embeddings
         processed_camera = self._process_camera_embeddings(camera_embeddings)
         
-        # Pass to agent encoder
+        # Pass to camera-aware agent encoder
         return self.agent_encoder(
             tokenized_agent, 
             map_feature,
             camera_embeddings=processed_camera,
-            cross_attn_layers=self.cross_attn_layers,
         )
     
     def _process_camera_embeddings(self, camera_embeddings: list) -> torch.Tensor:
@@ -167,9 +165,8 @@ class CameraAwareDecoder(SMARTDecoder):
         # Process camera embeddings
         processed_camera = self._process_camera_embeddings(camera_embeddings)
         
-        # Pass to agent encoder inference
+        # Pass to camera-aware agent encoder inference
         return self.agent_encoder.inference(
             tokenized_agent, map_feature, sampling_scheme, 
             camera_embeddings=processed_camera,
-            cross_attn_layers=self.cross_attn_layers
         ) 
