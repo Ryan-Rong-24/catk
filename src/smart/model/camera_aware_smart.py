@@ -209,5 +209,21 @@ class CameraAwareSMART(SMART):
                     target=data["agent"]["position"][:, self.num_historical_steps :, : pred_traj.shape[-1]],
                     target_valid=data["agent"]["valid_mask"][:, self.num_historical_steps :],
                 )
-                # Add WOSAC metrics computation if needed
-                # ... (rest of parent validation logic) 
+
+                # WOSAC metrics
+                if batch_idx < self.n_batch_wosac_metric:
+                    device = pred_traj.device
+                    from src.utils.wosac_utils import get_scenario_rollouts, get_scenario_id_int_tensor
+                    scenario_rollouts = get_scenario_rollouts(
+                        scenario_id=get_scenario_id_int_tensor(data["scenario_id"], device),
+                        agent_id=data["agent"]["id"],
+                        agent_batch=data["agent"]["batch"],
+                        pred_traj=pred_traj,
+                        pred_z=pred_z,
+                        pred_head=pred_head,
+                    )
+                    self.wosac_metrics.update(data["tfrecord_path"], scenario_rollouts)
+
+            # Visualization (skip for simplicity during debugging)
+            # if self.global_rank == 0 and batch_idx < self.n_vis_batch:
+            #     # Add visualization logic if needed 
