@@ -96,6 +96,21 @@ class CameraAwareDecoder(SMARTDecoder):
             raise ValueError("Camera embeddings are required for CameraAwareDecoder. "
                            "Use the original SMARTDecoder if you don't have camera data.")
         
+        # Debug: Log camera embeddings structure during actual training
+        print(f"\nDEBUG - Camera embeddings structure:")
+        print(f"  Type: {type(camera_embeddings)}")
+        if isinstance(camera_embeddings, list) and len(camera_embeddings) > 0:
+            print(f"  Length: {len(camera_embeddings)}")
+            print(f"  First frame type: {type(camera_embeddings[0])}")
+            if isinstance(camera_embeddings[0], dict):
+                print(f"  First frame keys: {list(camera_embeddings[0].keys())}")
+            elif isinstance(camera_embeddings[0], list):
+                print(f"  First frame length: {len(camera_embeddings[0])}")
+                if len(camera_embeddings[0]) > 0:
+                    print(f"  First element type: {type(camera_embeddings[0][0])}")
+                    if hasattr(camera_embeddings[0][0], 'shape'):
+                        print(f"  First element shape: {camera_embeddings[0][0].shape}")
+        
         # Process camera embeddings
         processed_camera = self._process_camera_embeddings(camera_embeddings)
         
