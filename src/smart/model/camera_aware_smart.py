@@ -167,7 +167,14 @@ class CameraAwareSMART(SMART):
             pred_list = []
             for i in range(len(processed_camera_batch)):
                 sample_tokenized_map = {k: v[i:i+1] for k, v in tokenized_map.items()}
+                # Reset batch indices to 0 for single sample processing
+                if "batch" in sample_tokenized_map:
+                    sample_tokenized_map["batch"] = torch.zeros_like(sample_tokenized_map["batch"])
+                
                 sample_tokenized_agent = {k: v[i:i+1] if isinstance(v, torch.Tensor) and v.shape[0] == len(processed_camera_batch) else v for k, v in tokenized_agent.items()}
+                # Reset batch indices to 0 for single sample processing  
+                if "batch" in sample_tokenized_agent:
+                    sample_tokenized_agent["batch"] = torch.zeros_like(sample_tokenized_agent["batch"])
                 
                 sample_pred = self.encoder(sample_tokenized_map, sample_tokenized_agent, processed_camera_batch[i])
                 pred_list.append(sample_pred)
@@ -196,7 +203,14 @@ class CameraAwareSMART(SMART):
                 pred_list = []
                 for i in range(len(processed_camera_batch)):
                     sample_tokenized_map = {k: v[i:i+1] for k, v in tokenized_map.items()}
+                    # Reset batch indices to 0 for single sample processing
+                    if "batch" in sample_tokenized_map:
+                        sample_tokenized_map["batch"] = torch.zeros_like(sample_tokenized_map["batch"])
+                    
                     sample_tokenized_agent = {k: v[i:i+1] if isinstance(v, torch.Tensor) and v.shape[0] == len(processed_camera_batch) else v for k, v in tokenized_agent.items()}
+                    # Reset batch indices to 0 for single sample processing
+                    if "batch" in sample_tokenized_agent:
+                        sample_tokenized_agent["batch"] = torch.zeros_like(sample_tokenized_agent["batch"])
                     
                     sample_pred = self.encoder.inference(
                         sample_tokenized_map, sample_tokenized_agent, self.validation_rollout_sampling,
