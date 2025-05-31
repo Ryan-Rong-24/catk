@@ -1,13 +1,21 @@
-_target_: src.smart.datamodules.MultiDataModule
-train_batch_size: 10
-val_batch_size: 10
-test_batch_size: 10
-num_workers: 10
+_target_: src.smart.datamodules.scalable_datamodule.MultiDataModule
+defaults:
+  - waymo
+
+# Use camera-aware data directories that contain camera embeddings
+train_raw_dir: "/workspace/scratch/cache/SMART_with_camera/training"
+val_raw_dir: "/workspace/scratch/cache/SMART_with_camera/validation"  
+test_raw_dir: "/workspace/scratch/cache/SMART_with_camera/testing"
+
+# Keep same validation tfrecords for evaluation
+val_tfrecords_splitted: "/workspace/scratch/data/womd/uncompressed/lidar_and_camera/validation"
+
+# Training parameters optimized for camera-aware training
+train_batch_size: 1  # Start with smaller batch size due to memory overhead
+val_batch_size: 1
+test_batch_size: 1
 shuffle: true
+num_workers: 4
 pin_memory: true
 persistent_workers: true
-train_raw_dir: /workspace/scratch/cache/SMART_with_camera/training
-val_raw_dir: /workspace/scratch/cache/SMART_with_camera/validation
-val_tfrecords_splitted: /workspace/scratch/cache/SMART/validation_tfrecords_splitted # Point to original scenario validation tfrecords
-test_raw_dir: /workspace/scratch/cache/SMART_with_camera/testing
-train_max_num: 32
+train_max_num: -1  # Use all available data
