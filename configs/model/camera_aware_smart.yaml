@@ -1,4 +1,4 @@
-_target_: src.smart.model.camera_aware_smart.CameraAwareSMART
+# _target_: src.smart.model.camera_aware_smart.CameraAwareSMART
 defaults:
   - smart
 
@@ -25,10 +25,3 @@ model_config:
   lr_warmup_steps: 1000
   lr_total_steps: 100000
   lr_min_ratio: 0.1
-
-  # Validation settings
-  n_rollout_closed_val: 5
-  n_vis_batch: 1
-  n_vis_scenario: 1
-  n_vis_rollout: 1
-  n_batch_wosac_metric: 2  # Keep WOSAC metrics enabled

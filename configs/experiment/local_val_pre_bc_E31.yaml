@@ -6,7 +6,7 @@ defaults:
 model:
   model_config:
     n_vis_batch: 1
-    n_vis_scenario: 2
+    n_vis_scenario: 1
     n_vis_rollout: 5
     n_batch_wosac_metric: 50
     val_open_loop: false
@@ -20,16 +20,16 @@ ckpt_path: /workspace/logs/pre_bc_E31.ckpt
 
 trainer:
   limit_train_batches: 1.0
-  limit_val_batches: 1.0
+  limit_val_batches: 1
   limit_test_batches: 1.0
   check_val_every_n_epoch: 1
 
 data:
-  train_batch_size: 16
-  val_batch_size: 16
-  test_batch_size: 16
-  num_workers: 8
-  val_raw_dir: /workspace/scratch/cache/SMART/validation
+  train_batch_size: 4
+  val_batch_size: 4
+  test_batch_size: 4
+  num_workers: 4
+  val_raw_dir: /workspace/scratch/cache/SMART/visualization
   val_tfrecords_splitted: /workspace/scratch/cache/SMART/validation_tfrecords_splitted
 
 # Logging settings
